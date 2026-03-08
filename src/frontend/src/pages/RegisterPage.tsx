@@ -14,15 +14,7 @@ import { toast } from "sonner";
 import CameraSection from "../components/CameraSection";
 import { useRegisterEmployee } from "../hooks/useQueries";
 
-const DEPARTMENTS = [
-  "Engineering",
-  "HR",
-  "Finance",
-  "Marketing",
-  "Operations",
-  "Sales",
-  "Other",
-];
+const DEPARTMENTS = ["Driver", "Office", "Other"];
 
 interface FormErrors {
   name?: string;
@@ -156,7 +148,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-name"
                 type="text"
-                placeholder="e.g. Sarah Johnson"
+                placeholder="Enter full name"
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
@@ -188,7 +180,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-id"
                 type="text"
-                placeholder="e.g. EMP-001"
+                placeholder="Enter employee ID"
                 value={employeeId}
                 onChange={(e) => {
                   setEmployeeId(e.target.value);
@@ -250,7 +242,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-role"
                 type="text"
-                placeholder="e.g. Senior Developer"
+                placeholder="Enter role or job title"
                 value={role}
                 onChange={(e) => {
                   setRole(e.target.value);

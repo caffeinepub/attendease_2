@@ -5,9 +5,9 @@ import Order "mo:core/Order";
 import Iter "mo:core/Iter";
 import Time "mo:core/Time";
 import Nat "mo:core/Nat";
-import Migration "migration";
 
-(with migration = Migration.run)
+
+
 actor {
   public type Employee = {
     employeeId : Text;
