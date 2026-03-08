@@ -28,6 +28,7 @@ export interface Employee {
   'department' : string,
   'registeredAt' : string,
 }
+export interface Holiday { 'date' : string, 'reason' : string }
 export interface MonthEndReport {
   'employeeName' : string,
   'presentDays' : bigint,
@@ -43,6 +44,7 @@ export interface Stats {
   'monthCheckIns' : bigint,
 }
 export interface _SERVICE {
+  'addHoliday' : ActorMethod<[string, string], boolean>,
   'approveEmployee' : ActorMethod<[string], boolean>,
   'checkIfAttendanceMarkedToday' : ActorMethod<[string, string], boolean>,
   'deleteEmployee' : ActorMethod<[string], boolean>,
@@ -50,6 +52,8 @@ export interface _SERVICE {
   'getAllEmployees' : ActorMethod<[], Array<Employee>>,
   'getAttendanceByEmployee' : ActorMethod<[string], Array<AttendanceRecord>>,
   'getEmployeeApprovalStatus' : ActorMethod<[string], string>,
+  'getHolidays' : ActorMethod<[], Array<Holiday>>,
+  'getHolidaysByMonth' : ActorMethod<[string], Array<Holiday>>,
   'getMonthEndReport' : ActorMethod<[string], Array<MonthEndReport>>,
   'getPendingEmployees' : ActorMethod<[], Array<Employee>>,
   'getRecentAttendance' : ActorMethod<[bigint], Array<AttendanceRecord>>,
@@ -63,6 +67,7 @@ export interface _SERVICE {
     boolean
   >,
   'rejectEmployee' : ActorMethod<[string], boolean>,
+  'removeHoliday' : ActorMethod<[string], boolean>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

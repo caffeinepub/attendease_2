@@ -39,7 +39,12 @@ export interface MonthEndReport {
     totalWorkingDays: bigint;
     department: string;
 }
+export interface Holiday {
+    date: string;
+    reason: string;
+}
 export interface backendInterface {
+    addHoliday(date: string, reason: string): Promise<boolean>;
     approveEmployee(employeeId: string): Promise<boolean>;
     checkIfAttendanceMarkedToday(employeeId: string, date: string): Promise<boolean>;
     deleteEmployee(employeeId: string): Promise<boolean>;
@@ -47,6 +52,8 @@ export interface backendInterface {
     getAllEmployees(): Promise<Array<Employee>>;
     getAttendanceByEmployee(employeeId: string): Promise<Array<AttendanceRecord>>;
     getEmployeeApprovalStatus(employeeId: string): Promise<string>;
+    getHolidays(): Promise<Array<Holiday>>;
+    getHolidaysByMonth(month: string): Promise<Array<Holiday>>;
     getMonthEndReport(month: string): Promise<Array<MonthEndReport>>;
     getPendingEmployees(): Promise<Array<Employee>>;
     getRecentAttendance(limit: bigint): Promise<Array<AttendanceRecord>>;
@@ -54,4 +61,5 @@ export interface backendInterface {
     markAttendance(name: string, employeeId: string, date: string, checkInTime: string, photoData: string): Promise<boolean>;
     registerEmployee(name: string, employeeId: string, department: string, role: string, photoData: string): Promise<boolean>;
     rejectEmployee(employeeId: string): Promise<boolean>;
+    removeHoliday(date: string): Promise<boolean>;
 }

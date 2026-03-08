@@ -1,0 +1,55 @@
+type Stats = 
+ record {
+   monthCheckIns: nat;
+   pendingEmployees: nat;
+   todayCheckIns: nat;
+   totalEmployees: nat;
+ };
+type MonthEndReport = 
+ record {
+   absentDays: nat;
+   department: text;
+   employeeId: text;
+   employeeName: text;
+   presentDays: nat;
+   totalWorkingDays: nat;
+ };
+type Employee = 
+ record {
+   approvalStatus: text;
+   department: text;
+   employeeId: text;
+   name: text;
+   photoData: text;
+   registeredAt: text;
+   role: text;
+ };
+type AttendanceRecord = 
+ record {
+   checkInTime: text;
+   date: text;
+   department: text;
+   employeeId: text;
+   employeeName: text;
+   photoData: text;
+   status: text;
+ };
+service : {
+  approveEmployee: (employeeId: text) -> (bool);
+  checkIfAttendanceMarkedToday: (employeeId: text, date: text) ->
+   (bool) query;
+  deleteEmployee: (employeeId: text) -> (bool);
+  getAllAttendance: () -> (vec AttendanceRecord) query;
+  getAllEmployees: () -> (vec Employee) query;
+  getAttendanceByEmployee: (employeeId: text) -> (vec AttendanceRecord) query;
+  getEmployeeApprovalStatus: (employeeId: text) -> (text) query;
+  getMonthEndReport: (month: text) -> (vec MonthEndReport) query;
+  getPendingEmployees: () -> (vec Employee) query;
+  getRecentAttendance: (limit: nat) -> (vec AttendanceRecord) query;
+  getStats: (date: text, month: text) -> (Stats) query;
+  markAttendance: (name: text, employeeId: text, date: text, checkInTime:
+   text, photoData: text) -> (bool);
+  registerEmployee: (name: text, employeeId: text, department: text, role:
+   text, photoData: text) -> (bool);
+  rejectEmployee: (employeeId: text) -> (bool);
+}

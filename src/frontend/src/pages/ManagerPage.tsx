@@ -34,6 +34,7 @@ import {
   AlertTriangle,
   BarChart3,
   CalendarDays,
+  CalendarOff,
   Check,
   CheckCircle2,
   Clock,
@@ -54,26 +55,20 @@ import type { AttendanceRecord } from "../backend.d";
 import {
   getCurrentMonth,
   getTodayDate,
+  useAddHoliday,
   useAllAttendance,
   useAllEmployees,
   useApproveEmployee,
   useDeleteEmployee,
+  useHolidays,
   useMonthEndReport,
   useRejectEmployee,
+  useRemoveHoliday,
   useStats,
 } from "../hooks/useQueries";
 
 const MANAGER_PIN = "1234";
-const DEPARTMENTS = [
-  "All",
-  "Engineering",
-  "HR",
-  "Finance",
-  "Marketing",
-  "Operations",
-  "Sales",
-  "Other",
-];
+const DEPARTMENTS = ["All", "Driver", "Office", "Other"];
 
 function formatTime(timeStr: string): string {
   try {
@@ -562,6 +557,12 @@ function AttendanceViewTab() {
   const [dateTo, setDateTo] = useState("");
 
   const { data: attendance, isLoading } = useAllAttendance();
+  const { data: holidays } = useHolidays();
+
+  const holidayDates = useMemo(() => {
+    if (!holidays) return new Set<string>();
+    return new Set(holidays.map((h) => h.date));
+  }, [holidays]);
 
   const filtered = useMemo(() => {
     if (!attendance) return [];
@@ -734,9 +735,16 @@ function AttendanceViewTab() {
                       {formatTime(record.checkInTime)}
                     </TableCell>
                     <TableCell>
-                      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-semibold text-xs">
-                        {record.status || "Present"}
-                      </Badge>
+                      {holidayDates.has(record.date) ? (
+                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border border-amber-200 font-semibold text-xs">
+                          <CalendarOff size={10} className="mr-1" />
+                          Holiday
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-semibold text-xs">
+                          {record.status || "Present"}
+                        </Badge>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -929,6 +937,275 @@ function MonthEndReportTab() {
   );
 }
 
+// ── Holidays Tab ──────────────────────────────────────────
+function HolidaysTab() {
+  const [holidayDate, setHolidayDate] = useState("");
+  const [holidayReason, setHolidayReason] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  const { data: holidays, isLoading } = useHolidays();
+  const { mutateAsync: addHoliday, isPending: isAdding } = useAddHoliday();
+  const { mutateAsync: removeHoliday, isPending: isRemoving } =
+    useRemoveHoliday();
+
+  const formatHolidayDate = (dateStr: string) => {
+    try {
+      return new Date(`${dateStr}T00:00:00`).toLocaleDateString("en-US", {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+      });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  const handleAddHoliday = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!holidayDate) {
+      toast.error("Please select a date");
+      return;
+    }
+    try {
+      const success = await addHoliday({
+        date: holidayDate,
+        reason: holidayReason.trim() || "Holiday",
+      });
+      if (success) {
+        toast.success("Holiday added", {
+          description: `${formatHolidayDate(holidayDate)} marked as holiday.`,
+        });
+        setHolidayDate("");
+        setHolidayReason("");
+      } else {
+        toast.error("This date is already a holiday");
+      }
+    } catch {
+      toast.error("Failed to add holiday");
+    }
+  };
+
+  const handleDelete = async (date: string) => {
+    try {
+      const success = await removeHoliday(date);
+      if (success) {
+        toast.success("Holiday removed", {
+          description: `${formatHolidayDate(date)} is no longer a holiday.`,
+        });
+      } else {
+        toast.error("Could not remove holiday");
+      }
+    } catch {
+      toast.error("Something went wrong");
+    } finally {
+      setDeleteTarget(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Add Holiday Form */}
+      <div className="form-section">
+        <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
+          <CalendarOff size={15} style={{ color: "oklch(var(--navy))" }} />
+          Mark a Date as Holiday
+        </h3>
+        <form onSubmit={handleAddHoliday} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label
+                htmlFor="holiday-date"
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+              >
+                Date <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="holiday-date"
+                type="date"
+                value={holidayDate}
+                onChange={(e) => setHolidayDate(e.target.value)}
+                className="text-sm"
+                data-ocid="manager.holiday_date_input"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="holiday-reason"
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+              >
+                Reason (optional)
+              </label>
+              <Input
+                id="holiday-reason"
+                type="text"
+                placeholder="e.g. National Holiday"
+                value={holidayReason}
+                onChange={(e) => setHolidayReason(e.target.value)}
+                className="text-sm"
+                data-ocid="manager.holiday_reason_input"
+              />
+            </div>
+          </div>
+          <Button
+            type="submit"
+            disabled={!holidayDate || isAdding}
+            className="font-semibold"
+            style={{ background: "oklch(var(--navy))", color: "white" }}
+            data-ocid="manager.holiday_add_button"
+          >
+            {isAdding ? (
+              <>
+                <Loader2 size={14} className="animate-spin mr-2" />
+                Adding…
+              </>
+            ) : (
+              <>
+                <CalendarOff size={14} className="mr-2" />
+                Add Holiday
+              </>
+            )}
+          </Button>
+        </form>
+      </div>
+
+      {/* Holidays List */}
+      <div
+        className="bg-white rounded-xl border border-border overflow-hidden shadow-card"
+        data-ocid="manager.holidays_table"
+      >
+        {isLoading ? (
+          <div className="p-6 space-y-3" data-ocid="manager.loading_state">
+            {[1, 2, 3].map((i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : !holidays || holidays.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-16 px-6 text-center"
+            data-ocid="manager.holidays_table.empty_state"
+          >
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
+              style={{ background: "oklch(var(--navy) / 0.06)" }}
+            >
+              <CalendarOff
+                size={24}
+                style={{ color: "oklch(var(--navy) / 0.4)" }}
+              />
+            </div>
+            <p className="text-base font-semibold text-foreground mb-1">
+              No holidays defined
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Add a holiday above to mark days off for the team.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead className="w-20">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {holidays
+                  .slice()
+                  .sort((a, b) => a.date.localeCompare(b.date))
+                  .map((holiday, idx) => (
+                    <TableRow
+                      key={holiday.date}
+                      data-ocid={`manager.holidays_table.row.${idx + 1}`}
+                    >
+                      <TableCell className="font-medium text-sm">
+                        <div className="flex items-center gap-2">
+                          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border border-amber-200 font-semibold text-xs">
+                            <CalendarOff size={10} className="mr-1" />
+                            Holiday
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            {formatHolidayDate(holiday.date)}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {holiday.reason || "—"}
+                      </TableCell>
+                      <TableCell>
+                        <AlertDialog
+                          open={deleteTarget === holiday.date}
+                          onOpenChange={(open) =>
+                            !open && setDeleteTarget(null)
+                          }
+                        >
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              disabled={isRemoving}
+                              onClick={() => setDeleteTarget(holiday.date)}
+                              data-ocid={`manager.holiday_delete_button.${idx + 1}`}
+                            >
+                              <Trash2 size={13} />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent data-ocid="manager.dialog">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="flex items-center gap-2">
+                                <AlertTriangle
+                                  size={18}
+                                  className="text-destructive"
+                                />
+                                Remove Holiday
+                              </AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Remove{" "}
+                                <strong>
+                                  {formatHolidayDate(holiday.date)}
+                                </strong>{" "}
+                                as a holiday? This will affect attendance
+                                calculations.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel
+                                data-ocid="manager.holiday_cancel_button"
+                                onClick={() => setDeleteTarget(null)}
+                              >
+                                Cancel
+                              </AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleDelete(holiday.date)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                data-ocid="manager.holiday_confirm_button"
+                              >
+                                {isRemoving ? (
+                                  <Loader2
+                                    size={14}
+                                    className="animate-spin mr-2"
+                                  />
+                                ) : null}
+                                Remove Holiday
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────
 function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useStats();
@@ -1017,7 +1294,7 @@ function Dashboard() {
         )}
       </div>
 
-      {/* Three-Tab Panel */}
+      {/* Four-Tab Panel */}
       <Tabs defaultValue="registered-ids" className="w-full">
         <TabsList
           className="w-full mb-6 h-12"
@@ -1050,6 +1327,15 @@ function Dashboard() {
             <span className="hidden sm:inline">Month-End Report</span>
             <span className="sm:hidden">Month-End</span>
           </TabsTrigger>
+          <TabsTrigger
+            value="holidays"
+            className="flex-1 gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
+            data-ocid="manager.tab.4"
+          >
+            <CalendarOff size={15} />
+            <span className="hidden sm:inline">Manage Holidays</span>
+            <span className="sm:hidden">Holidays</span>
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="registered-ids">
@@ -1060,6 +1346,9 @@ function Dashboard() {
         </TabsContent>
         <TabsContent value="month-end">
           <MonthEndReportTab />
+        </TabsContent>
+        <TabsContent value="holidays">
+          <HolidaysTab />
         </TabsContent>
       </Tabs>
     </div>

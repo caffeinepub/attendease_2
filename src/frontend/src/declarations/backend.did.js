@@ -26,6 +26,7 @@ export const Employee = IDL.Record({
   'department' : IDL.Text,
   'registeredAt' : IDL.Text,
 });
+export const Holiday = IDL.Record({ 'date' : IDL.Text, 'reason' : IDL.Text });
 export const MonthEndReport = IDL.Record({
   'employeeName' : IDL.Text,
   'presentDays' : IDL.Nat,
@@ -42,6 +43,7 @@ export const Stats = IDL.Record({
 });
 
 export const idlService = IDL.Service({
+  'addHoliday' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
   'approveEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
   'checkIfAttendanceMarkedToday' : IDL.Func(
       [IDL.Text, IDL.Text],
@@ -57,6 +59,8 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getEmployeeApprovalStatus' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
+  'getHolidays' : IDL.Func([], [IDL.Vec(Holiday)], ['query']),
+  'getHolidaysByMonth' : IDL.Func([IDL.Text], [IDL.Vec(Holiday)], ['query']),
   'getMonthEndReport' : IDL.Func(
       [IDL.Text],
       [IDL.Vec(MonthEndReport)],
@@ -80,6 +84,7 @@ export const idlService = IDL.Service({
       [],
     ),
   'rejectEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
+  'removeHoliday' : IDL.Func([IDL.Text], [IDL.Bool], []),
 });
 
 export const idlInitArgs = [];
@@ -103,6 +108,7 @@ export const idlFactory = ({ IDL }) => {
     'department' : IDL.Text,
     'registeredAt' : IDL.Text,
   });
+  const Holiday = IDL.Record({ 'date' : IDL.Text, 'reason' : IDL.Text });
   const MonthEndReport = IDL.Record({
     'employeeName' : IDL.Text,
     'presentDays' : IDL.Nat,
@@ -119,6 +125,7 @@ export const idlFactory = ({ IDL }) => {
   });
   
   return IDL.Service({
+    'addHoliday' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
     'approveEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
     'checkIfAttendanceMarkedToday' : IDL.Func(
         [IDL.Text, IDL.Text],
@@ -134,6 +141,8 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getEmployeeApprovalStatus' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
+    'getHolidays' : IDL.Func([], [IDL.Vec(Holiday)], ['query']),
+    'getHolidaysByMonth' : IDL.Func([IDL.Text], [IDL.Vec(Holiday)], ['query']),
     'getMonthEndReport' : IDL.Func(
         [IDL.Text],
         [IDL.Vec(MonthEndReport)],
@@ -157,6 +166,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'rejectEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
+    'removeHoliday' : IDL.Func([IDL.Text], [IDL.Bool], []),
   });
 };
 

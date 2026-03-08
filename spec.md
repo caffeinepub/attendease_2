@@ -1,46 +1,40 @@
 # AttendEase
 
 ## Current State
-- Four pages: Register, Mark Attendance, My Attendance, Manager Portal
-- Registration immediately activates the employee (no approval gate)
-- Attendance can be marked by any name/ID regardless of approval status
-- Manager Portal has a single table showing all attendance records
-- No photo display in manager view (photoData stored but not shown)
-- No month-end summary of present/absent days
-- Manager access gated by PIN "1234"
+Full-stack employee attendance app with:
+- Employee registration (photo capture, department, role) with manager approval workflow
+- Mark Attendance (camera photo capture, approved employees only, one check-in per day)
+- My Attendance page (view attendance history by employee ID)
+- Manager Portal (PIN: 1234) with 3 tabs: Registered IDs, Attendance View, Month-End Report
+- Month-End Report calculates totalWorkingDays as all calendar days in the month (no weekend exclusions)
+- No holiday management exists
 
 ## Requested Changes (Diff)
 
 ### Add
-- `approvalStatus` field to Employee: "pending" | "approved" | "rejected"
-- `approveEmployee(id)` and `rejectEmployee(id)` backend methods
-- `getPendingEmployees()` query to fetch pending-only employees
-- Manager portal: three tabs — "Registered IDs", "Attendance View", "Month-End Report"
-  - Registered IDs tab: table of all employees with name, ID, department, role, status badge; Accept/Reject buttons for pending entries
-  - Attendance View tab: existing attendance table with employee photo shown as thumbnail
-  - Month-End Report tab: per-employee summary with name, ID, total days present, total days absent (calculated vs working days in selected month)
-- Attendance mark page: validate that employee is approved before allowing check-in; show "Pending approval" or "Rejected" message if not approved
+- `Holiday` type in backend: `{ date: Text; reason: Text }`
+- `addHoliday(date, reason)` backend function -- manager adds a holiday by date (YYYY-MM-DD) and optional reason
+- `removeHoliday(date)` backend function -- manager removes a holiday by date
+- `getHolidays()` backend function -- returns all holidays as array
+- `getHolidaysByMonth(month)` backend function -- returns holidays for a given month (YYYY-MM)
+- Month-End Report logic: totalWorkingDays = calendar days in month MINUS holidays in that month; absentDays = totalWorkingDays - presentDays (min 0)
+- "Holidays" tab (4th tab) in Manager Portal where manager can:
+  - Pick a date and enter a reason to add a holiday
+  - See a list of all holidays with date, reason, and a delete button
+- Holiday dates shown with a "Holiday" badge in Attendance View table
+- Frontend hooks: `useHolidays`, `useHolidaysByMonth`, `useAddHoliday`, `useRemoveHoliday`
 
 ### Modify
-- `markAttendance` backend: check `approvalStatus == "approved"` before recording; return false if not approved
-- `registerEmployee` backend: set `approvalStatus = "pending"` on creation instead of active
-- Manager Portal Dashboard now has three panels/tabs replacing the single table
-- Manager Registered IDs panel shows photo thumbnail from photoData if available
+- `getMonthEndReport(month)`: subtract holiday count for that month from totalWorkingDays before computing absentDays
+- Manager Portal: add 4th tab "Holidays" alongside Registered IDs, Attendance View, Month-End Report
+- Attendance View table: if a date matches a holiday, show "Holiday" badge instead of "Present"
 
 ### Remove
-- The direct attendance mark for non-approved employees (blocked at backend and frontend)
+- Nothing removed
 
 ## Implementation Plan
-1. Regenerate Motoko backend with:
-   - Employee type gains `approvalStatus: Text` ("pending"/"approved"/"rejected")
-   - New functions: `approveEmployee`, `rejectEmployee`, `getPendingEmployees`, `getAllEmployeesWithStatus`, `getMonthEndReport`
-   - `markAttendance` checks approval before recording
-   - `getStats` also returns pendingCount
-2. Update `backend.d.ts` to reflect new types and functions
-3. Update `useQueries.ts` to add hooks: `useApproveEmployee`, `useRejectEmployee`, `usePendingEmployees`, `useAllEmployeesWithStatus`, `useMonthEndReport`
-4. Rewrite `ManagerPage.tsx` with three tab panels:
-   - Tab 1 "Registered IDs": employee list with Accept/Reject actions
-   - Tab 2 "Attendance View": attendance table with photo thumbnails
-   - Tab 3 "Month-End Report": per-employee present/absent summary for selected month
-5. Update `AttendancePage.tsx` to show approval status error if employee not approved
-6. Update `RegisterPage.tsx` to clarify registration is pending manager approval
+1. Regenerate Motoko backend with Holiday type, addHoliday/removeHoliday/getHolidays/getHolidaysByMonth functions, and updated getMonthEndReport
+2. Add holiday hooks (useHolidays, useHolidaysByMonth, useAddHoliday, useRemoveHoliday) to useQueries.ts
+3. Add Holidays tab to ManagerPage.tsx with date picker + reason input + holiday list table with remove buttons
+4. Update Attendance View to show "Holiday" badge when a record date matches a holiday
+5. Validate and deploy

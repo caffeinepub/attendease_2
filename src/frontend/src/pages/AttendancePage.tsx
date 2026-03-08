@@ -143,14 +143,20 @@ export default function AttendancePage() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+
+    // Scale down to max 320×240 to stay within ICP message size limits
+    const srcW = video.videoWidth || 640;
+    const srcH = video.videoHeight || 480;
+    const scale = Math.min(320 / srcW, 240 / srcH, 1);
+    canvas.width = Math.round(srcW * scale);
+    canvas.height = Math.round(srcH * scale);
+
     const ctx = canvas.getContext("2d")!;
     ctx.save();
     ctx.scale(-1, 1);
-    ctx.drawImage(video, -canvas.width, 0);
+    ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
     stopStream();
     setCameraState("captured");
     setPhotoData(dataUrl);
@@ -242,10 +248,13 @@ export default function AttendancePage() {
             "Please verify the name and ID match a registered employee.",
         });
       }
-    } catch {
+    } catch (error) {
       setIsCheckingApproval(false);
       setApprovalState("idle");
-      toast.error("Something went wrong", { description: "Please try again." });
+      toast.error("Something went wrong", {
+        description:
+          error instanceof Error ? error.message : "Please try again.",
+      });
     }
   };
 

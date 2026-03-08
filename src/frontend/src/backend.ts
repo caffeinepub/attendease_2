@@ -121,7 +121,12 @@ export interface MonthEndReport {
     totalWorkingDays: bigint;
     department: string;
 }
+export interface Holiday {
+    date: string;
+    reason: string;
+}
 export interface backendInterface {
+    addHoliday(date: string, reason: string): Promise<boolean>;
     approveEmployee(employeeId: string): Promise<boolean>;
     checkIfAttendanceMarkedToday(employeeId: string, date: string): Promise<boolean>;
     deleteEmployee(employeeId: string): Promise<boolean>;
@@ -129,6 +134,8 @@ export interface backendInterface {
     getAllEmployees(): Promise<Array<Employee>>;
     getAttendanceByEmployee(employeeId: string): Promise<Array<AttendanceRecord>>;
     getEmployeeApprovalStatus(employeeId: string): Promise<string>;
+    getHolidays(): Promise<Array<Holiday>>;
+    getHolidaysByMonth(month: string): Promise<Array<Holiday>>;
     getMonthEndReport(month: string): Promise<Array<MonthEndReport>>;
     getPendingEmployees(): Promise<Array<Employee>>;
     getRecentAttendance(limit: bigint): Promise<Array<AttendanceRecord>>;
@@ -136,9 +143,24 @@ export interface backendInterface {
     markAttendance(name: string, employeeId: string, date: string, checkInTime: string, photoData: string): Promise<boolean>;
     registerEmployee(name: string, employeeId: string, department: string, role: string, photoData: string): Promise<boolean>;
     rejectEmployee(employeeId: string): Promise<boolean>;
+    removeHoliday(date: string): Promise<boolean>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async addHoliday(arg0: string, arg1: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.addHoliday(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.addHoliday(arg0, arg1);
+            return result;
+        }
+    }
     async approveEmployee(arg0: string): Promise<boolean> {
         if (this.processError) {
             try {
@@ -237,6 +259,34 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getHolidays(): Promise<Array<Holiday>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getHolidays();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getHolidays();
+            return result;
+        }
+    }
+    async getHolidaysByMonth(arg0: string): Promise<Array<Holiday>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getHolidaysByMonth(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getHolidaysByMonth(arg0);
+            return result;
+        }
+    }
     async getMonthEndReport(arg0: string): Promise<Array<MonthEndReport>> {
         if (this.processError) {
             try {
@@ -332,6 +382,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.rejectEmployee(arg0);
+            return result;
+        }
+    }
+    async removeHoliday(arg0: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.removeHoliday(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.removeHoliday(arg0);
             return result;
         }
     }

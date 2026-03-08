@@ -92,9 +92,10 @@ export default function RegisterPage() {
           description: "An employee with this ID may already exist.",
         });
       }
-    } catch {
+    } catch (error) {
       toast.error("Something went wrong", {
-        description: "Please try again.",
+        description:
+          error instanceof Error ? error.message : "Please try again.",
       });
     }
   };

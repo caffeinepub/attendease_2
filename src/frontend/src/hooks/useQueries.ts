@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   AttendanceRecord,
   Employee,
+  Holiday,
   MonthEndReport,
   Stats,
 } from "../backend.d";
@@ -226,6 +227,63 @@ export function useDeleteEmployee() {
       qc.invalidateQueries({ queryKey: ["allEmployees"] });
       qc.invalidateQueries({ queryKey: ["allAttendance"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+// ── Holidays ───────────────────────────────────────────────
+export function useHolidays() {
+  const { actor, isFetching } = useActor();
+  return useQuery<Holiday[]>({
+    queryKey: ["holidays"],
+    queryFn: async () => {
+      if (!actor) return [];
+      return actor.getHolidays();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useHolidaysByMonth(month: string) {
+  const { actor, isFetching } = useActor();
+  return useQuery<Holiday[]>({
+    queryKey: ["holidaysByMonth", month],
+    queryFn: async () => {
+      if (!actor || !month) return [];
+      return actor.getHolidaysByMonth(month);
+    },
+    enabled: !!actor && !isFetching && month.length > 0,
+  });
+}
+
+export function useAddHoliday() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { date: string; reason: string }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.addHoliday(params.date, params.reason);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["holidays"] });
+      qc.invalidateQueries({ queryKey: ["holidaysByMonth"] });
+      qc.invalidateQueries({ queryKey: ["monthEndReport"] });
+    },
+  });
+}
+
+export function useRemoveHoliday() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (date: string) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.removeHoliday(date);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["holidays"] });
+      qc.invalidateQueries({ queryKey: ["holidaysByMonth"] });
+      qc.invalidateQueries({ queryKey: ["monthEndReport"] });
     },
   });
 }
