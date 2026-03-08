@@ -66,6 +66,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AttendanceRecord } from "../backend.d";
 import {
+  countWorkingDaysExcludingSundays,
   getCurrentMonth,
   getTodayDate,
   useAddHoliday,
@@ -1068,8 +1069,24 @@ function MonthEndReportTab() {
   const [monthlySalaryInput, setMonthlySalaryInput] = useState("");
 
   const { data: report, isLoading } = useMonthEndReport(selectedMonth);
+  const { data: holidays } = useHolidays();
   const { mutateAsync: setSalaryForMonth, isPending: isSettingSalary } =
     useSetSalaryForMonth();
+
+  // Compute working days excluding Sundays for the selected month
+  const holidayDateSet = useMemo(() => {
+    if (!holidays) return new Set<string>();
+    return new Set(
+      holidays
+        .filter((h) => h.date.startsWith(selectedMonth))
+        .map((h) => h.date),
+    );
+  }, [holidays, selectedMonth]);
+
+  const workingDaysInMonth = useMemo(
+    () => countWorkingDaysExcludingSundays(selectedMonth, holidayDateSet),
+    [selectedMonth, holidayDateSet],
+  );
 
   const totalPresent = report
     ? report.reduce((sum, r) => sum + Number(r.presentDays), 0)
@@ -1101,13 +1118,21 @@ function MonthEndReportTab() {
     });
   };
 
-  const getDailyRate = (
-    monthlyPayment: bigint,
-    totalWorkingDays: bigint,
-  ): string => {
-    if (monthlyPayment === 0n || totalWorkingDays === 0n) return "—";
-    const rate = Number(monthlyPayment) / Number(totalWorkingDays);
+  const getDailyRate = (monthlyPayment: bigint): string => {
+    if (monthlyPayment === 0n || workingDaysInMonth === 0) return "—";
+    const rate = Number(monthlyPayment) / workingDaysInMonth;
     return `₹${rate.toFixed(2)}`;
+  };
+
+  const getFrontendEarnedAmount = (
+    monthlyPayment: bigint,
+    presentDays: bigint,
+  ): string => {
+    if (monthlyPayment === 0n || workingDaysInMonth === 0) return "—";
+    const earned = Math.round(
+      (Number(monthlyPayment) * Number(presentDays)) / workingDaysInMonth,
+    );
+    return `₹${earned.toLocaleString("en-IN")}`;
   };
 
   const getMonthDisplayName = (monthStr: string): string => {
@@ -1359,7 +1384,7 @@ function MonthEndReportTab() {
                 {report.map((row, idx) => {
                   const pct = getAttendancePct(
                     row.presentDays,
-                    row.totalWorkingDays,
+                    BigInt(workingDaysInMonth),
                   );
                   const isExpanded = expandedRows.has(row.employeeId);
                   return (
@@ -1421,14 +1446,16 @@ function MonthEndReportTab() {
                         </TableCell>
                         <TableCell className="text-center">
                           <div className="flex flex-col items-center gap-1">
-                            {row.earnedAmount > 0n ||
-                            row.monthlyPayment > 0n ? (
+                            {row.monthlyPayment > 0n ? (
                               <div className="flex flex-col items-center">
                                 <span
                                   className="text-sm font-bold"
                                   style={{ color: "oklch(0.55 0.17 145)" }}
                                 >
-                                  ₹{row.earnedAmount.toString()}
+                                  {getFrontendEarnedAmount(
+                                    row.monthlyPayment,
+                                    row.presentDays,
+                                  )}
                                 </span>
                                 <span className="text-xs text-muted-foreground">
                                   / ₹{row.monthlyPayment.toString()}
@@ -1530,10 +1557,10 @@ function MonthEndReportTab() {
                                   </div>
                                   <div className="space-y-0.5">
                                     <p className="text-xs text-muted-foreground">
-                                      Total Working Days
+                                      Working Days (excl. Sundays)
                                     </p>
                                     <p className="text-sm font-semibold">
-                                      {row.totalWorkingDays.toString()}
+                                      {workingDaysInMonth}
                                     </p>
                                   </div>
                                   <div className="space-y-0.5">
@@ -1552,10 +1579,7 @@ function MonthEndReportTab() {
                                       Daily Rate
                                     </p>
                                     <p className="text-sm font-semibold text-blue-600">
-                                      {getDailyRate(
-                                        row.monthlyPayment,
-                                        row.totalWorkingDays,
-                                      )}
+                                      {getDailyRate(row.monthlyPayment)}
                                     </p>
                                   </div>
                                   <div className="space-y-0.5">
@@ -1567,7 +1591,10 @@ function MonthEndReportTab() {
                                       style={{ color: "oklch(0.55 0.17 145)" }}
                                     >
                                       {row.monthlyPayment > 0n ? (
-                                        `₹${row.earnedAmount.toString()}`
+                                        getFrontendEarnedAmount(
+                                          row.monthlyPayment,
+                                          row.presentDays,
+                                        )
                                       ) : (
                                         <span className="italic text-sm text-muted-foreground">
                                           —

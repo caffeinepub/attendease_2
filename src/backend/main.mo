@@ -5,9 +5,9 @@ import Text "mo:core/Text";
 import Time "mo:core/Time";
 import Int "mo:core/Int";
 import Iter "mo:core/Iter";
-import Migration "migration";
 
-(with migration = Migration.run)
+
+
 actor {
   type Employee = {
     employeeId : Text;

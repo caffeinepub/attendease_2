@@ -18,6 +18,30 @@ export function getCurrentMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; // YYYY-MM
 }
 
+/**
+ * Count working days in a month excluding Sundays (and optionally excluding
+ * a set of holiday date strings like "2026-03-08").
+ */
+export function countWorkingDaysExcludingSundays(
+  month: string,
+  holidayDates: Set<string> = new Set(),
+): number {
+  const [yearStr, monthStr] = month.split("-");
+  const year = Number(yearStr);
+  const monthIdx = Number(monthStr) - 1; // 0-based for Date
+  if (Number.isNaN(year) || Number.isNaN(monthIdx)) return 0;
+  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
+  let count = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, monthIdx, d);
+    if (date.getDay() === 0) continue; // skip Sunday
+    const dateStr = `${year}-${String(monthIdx + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    if (holidayDates.has(dateStr)) continue; // skip holidays
+    count++;
+  }
+  return count;
+}
+
 // ── Stats ──────────────────────────────────────────────────
 export function useStats() {
   const { actor, isFetching } = useActor();
@@ -321,6 +345,20 @@ export function useRemoveHoliday() {
       qc.invalidateQueries({ queryKey: ["holidaysByMonth"] });
       qc.invalidateQueries({ queryKey: ["monthEndReport"] });
     },
+  });
+}
+
+// ── Get Salary for Month ───────────────────────────────────
+export function useGetSalaryForMonth(employeeId: string, month: string) {
+  const { actor, isFetching } = useActor();
+  return useQuery<bigint>({
+    queryKey: ["salaryForMonth", employeeId, month],
+    queryFn: async () => {
+      if (!actor || !employeeId || !month) return 0n;
+      return actor.getSalaryForMonth(employeeId, month);
+    },
+    enabled:
+      !!actor && !isFetching && employeeId.length > 0 && month.length > 0,
   });
 }
 

@@ -10,10 +10,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Calendar, Flame, Loader2, Search, TrendingUp } from "lucide-react";
+import {
+  Calendar,
+  Flame,
+  IndianRupee,
+  Loader2,
+  Search,
+  TrendingUp,
+} from "lucide-react";
 import { useState } from "react";
 import type { AttendanceRecord } from "../backend.d";
-import { getCurrentMonth, useAttendanceByEmployee } from "../hooks/useQueries";
+import {
+  countWorkingDaysExcludingSundays,
+  getCurrentMonth,
+  useAttendanceByEmployee,
+  useGetSalaryForMonth,
+  useHolidays,
+} from "../hooks/useQueries";
 
 function calculateStreak(records: AttendanceRecord[]): number {
   if (records.length === 0) return 0;
@@ -98,6 +111,10 @@ export default function MyAttendancePage() {
     isFetching,
   } = useAttendanceByEmployee(searchId);
 
+  const currentMonth = getCurrentMonth();
+  const { data: monthlySalary } = useGetSalaryForMonth(searchId, currentMonth);
+  const { data: holidays } = useHolidays();
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (lookupId.trim()) {
@@ -112,6 +129,23 @@ export default function MyAttendancePage() {
     : [];
   const streak = records ? calculateStreak(records) : 0;
   const monthCount = records ? countThisMonth(records) : 0;
+
+  // Salary calculation (Sundays excluded from working days)
+  const salary = monthlySalary ?? 0n;
+  const holidayDateSet = new Set(
+    (holidays ?? [])
+      .filter((h) => h.date.startsWith(currentMonth))
+      .map((h) => h.date),
+  );
+  const workingDaysInMonth = countWorkingDaysExcludingSundays(
+    currentMonth,
+    holidayDateSet,
+  );
+  const dailyRate =
+    salary > 0n && workingDaysInMonth > 0
+      ? Number(salary) / workingDaysInMonth
+      : 0;
+  const earnedAmount = dailyRate > 0 ? Math.round(dailyRate * monthCount) : 0;
 
   return (
     <div className="p-6 lg:p-8 max-w-4xl mx-auto">
@@ -221,7 +255,7 @@ export default function MyAttendancePage() {
         records.length > 0 && (
           <div>
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
               <div className="stat-card">
                 <div className="flex items-center gap-3">
                   <div
@@ -272,6 +306,47 @@ export default function MyAttendancePage() {
                         {streak === 1 ? "day" : "days"}
                       </span>
                     </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Salary Card */}
+              <div
+                className="stat-card sm:col-span-2 lg:col-span-1"
+                data-ocid="myattendance.salary_card"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ background: "oklch(0.55 0.15 260 / 0.12)" }}
+                  >
+                    <IndianRupee
+                      size={18}
+                      style={{ color: "oklch(0.45 0.15 260)" }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-muted-foreground">
+                      Salary Earned (This Month)
+                    </p>
+                    {salary > 0n ? (
+                      <>
+                        <p
+                          className="text-2xl font-display font-bold"
+                          style={{ color: "oklch(0.45 0.15 260)" }}
+                        >
+                          ₹{earnedAmount.toLocaleString("en-IN")}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          ₹{Number(salary).toLocaleString("en-IN")} / month ·{" "}
+                          {monthCount} of {workingDaysInMonth} working days
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic mt-1">
+                        Salary not set by manager
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
