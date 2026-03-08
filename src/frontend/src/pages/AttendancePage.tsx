@@ -22,6 +22,7 @@ import {
 interface FormErrors {
   name?: string;
   employeeId?: string;
+  photo?: string;
 }
 
 type ApprovalState =
@@ -58,6 +59,13 @@ export default function AttendancePage() {
     const newErrors: FormErrors = {};
     if (!name.trim()) newErrors.name = "Employee name is required";
     if (!employeeId.trim()) newErrors.employeeId = "Employee ID is required";
+    if (!photoData) {
+      newErrors.photo =
+        "Photo is required. Please capture a photo to mark attendance.";
+      toast.error("Photo is required", {
+        description: "Please capture a photo to mark attendance.",
+      });
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -336,10 +344,16 @@ export default function AttendancePage() {
           <div className="pt-2 border-t border-border">
             <CameraSection
               capturedImage={photoData}
-              onCapture={(img) => setPhotoData(img)}
+              onCapture={(img) => {
+                setPhotoData(img);
+                if (errors.photo)
+                  setErrors((p) => ({ ...p, photo: undefined }));
+              }}
               onClear={() => setPhotoData(null)}
               cameraButtonOcid="attendance.camera_button"
               captureButtonOcid="attendance.capture_button"
+              required={true}
+              photoError={errors.photo}
             />
           </div>
 

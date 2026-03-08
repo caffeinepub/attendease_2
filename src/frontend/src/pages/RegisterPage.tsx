@@ -21,6 +21,7 @@ interface FormErrors {
   employeeId?: string;
   department?: string;
   role?: string;
+  photo?: string;
 }
 
 export default function RegisterPage() {
@@ -40,6 +41,13 @@ export default function RegisterPage() {
     if (!employeeId.trim()) newErrors.employeeId = "Employee ID is required";
     if (!department) newErrors.department = "Please select a department";
     if (!role.trim()) newErrors.role = "Role / job title is required";
+    if (!photoData) {
+      newErrors.photo =
+        "Photo is required. Please capture a photo before submitting.";
+      toast.error("Photo is required", {
+        description: "Please capture a photo before submitting.",
+      });
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -266,10 +274,16 @@ export default function RegisterPage() {
           <div className="pt-2 border-t border-border">
             <CameraSection
               capturedImage={photoData}
-              onCapture={(img) => setPhotoData(img)}
+              onCapture={(img) => {
+                setPhotoData(img);
+                if (errors.photo)
+                  setErrors((p) => ({ ...p, photo: undefined }));
+              }}
               onClear={() => setPhotoData(null)}
               cameraButtonOcid="register.camera_button"
               captureButtonOcid="register.capture_button"
+              required={true}
+              photoError={errors.photo}
             />
           </div>
 
