@@ -86,7 +86,7 @@ export default function RegisterPage() {
             employeeId: employeeId.trim(),
             department,
             role: role.trim(),
-            photoData: photoData ?? "",
+            photoData: "",
           });
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
