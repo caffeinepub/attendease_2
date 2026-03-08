@@ -12,6 +12,7 @@ import { Loader2, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import CameraSection from "../components/CameraSection";
+import { useActor } from "../hooks/useActor";
 import { useRegisterEmployee } from "../hooks/useQueries";
 
 const DEPARTMENTS = ["Driver", "Office", "Other"];
@@ -33,6 +34,7 @@ export default function RegisterPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const { actor, isFetching: isActorLoading } = useActor();
   const { mutateAsync: registerEmployee, isPending } = useRegisterEmployee();
 
   const validate = (): boolean => {
@@ -55,6 +57,13 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
+
+    if (!actor) {
+      toast.error("Connecting to server...", {
+        description: "Please wait a moment and try again.",
+      });
+      return;
+    }
 
     try {
       const success = await registerEmployee({
@@ -290,15 +299,23 @@ export default function RegisterPage() {
           <div className="pt-2">
             <Button
               type="submit"
-              disabled={isPending}
+              disabled={isPending || isActorLoading || !actor}
               className="w-full sm:w-auto h-11 font-semibold px-8"
               style={{
-                background: isPending ? undefined : "oklch(var(--navy))",
+                background:
+                  isPending || isActorLoading
+                    ? undefined
+                    : "oklch(var(--navy))",
                 color: "white",
               }}
               data-ocid="register.submit_button"
             >
-              {isPending ? (
+              {isActorLoading ? (
+                <>
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                  Connecting...
+                </>
+              ) : isPending ? (
                 <>
                   <Loader2 size={16} className="mr-2 animate-spin" />
                   Registering...
