@@ -280,7 +280,6 @@ export default function RegisterPage() {
                   setErrors((p) => ({ ...p, photo: undefined }));
               }}
               onClear={() => setPhotoData(null)}
-              cameraButtonOcid="register.camera_button"
               captureButtonOcid="register.capture_button"
               required={true}
               photoError={errors.photo}
