@@ -1,35 +1,40 @@
 # AttendEase
 
 ## Current State
-Full employee attendance management app with:
-- Employee registration (photo, name, ID, department, role)
-- Manager approval workflow (approve with salary, reject, delete)
-- Attendance marking with face photo
-- Manager portal (PIN: 1234) with 4 tabs: Registered IDs, Attendance View, Month-End Report, Holidays
-- Single global monthlyPayment per employee
-- Per-month salary can be set at approval time or updated via pencil icon
+The app has 4 portals: Register, Mark Attendance, My Attendance, Manager Portal.
+- Employees can mark their own attendance from the "Mark Attendance" portal.
+- The top nav shows all 4 portals to everyone.
+- My Attendance is already read-only (no edit controls).
+- Manager Portal has 4 tabs: Registered IDs, Attendance View, Month-End Report, Manage Holidays.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Per-month salary storage: `setSalaryForMonth(employeeId, month, salary)` — stores a salary for a specific employee for a specific month (YYYY-MM format)
-- `getSalaryForMonth(employeeId, month)` — returns the salary for that month, falling back to employee's default `monthlyPayment` if not set
-- Month-End Report tab: "Set/Edit Salary for Month" button per employee row to set or override the salary for that specific selected month
-- Salary is mandatory on approval: input must be >= 1 (no longer allows 0 or empty)
+- A new "Mark Attendance" tab inside the Manager Portal Dashboard (5th tab), where the manager can:
+  - See a list of all approved employees for today
+  - Mark each approved employee as present for today's date (with a time stamp)
+  - The backend `markAttendance` API already exists and accepts: name, employeeId, date, checkInTime, photoData (photoData can be empty string when manager marks)
+  - Show which employees are already marked today (disabled/checked state)
+  - Show today's date clearly
 
 ### Modify
-- `getMonthEndReport`: use per-month salary override if set for that month, otherwise fall back to employee's default `monthlyPayment`
-- `deleteEmployee`: also clean up any `monthlySalaries` records for that employee
-- Approval payment dialog: make salary field required (min = 1, validation error if 0 or empty)
-- Month-End Report tab: show "Edit Salary" pencil button per row that opens a dialog to set the salary for the selected month
+- **TopNav**: Remove the "Mark Attendance" nav item entirely (the `attendance` page id entry). Navigation should only show: Register, My Attendance, Manager Portal.
+- **App.tsx**: Remove `attendance` from `PageId` type and remove the `AttendancePage` case from the router. Default page stays "register".
+- **Manager Portal tabs**: Add a 5th tab "Mark Attendance" (with a Camera or UserCheck icon) between "Registered IDs" and "Attendance View", or at the end -- place it as tab 2 (right after Registered IDs).
 
 ### Remove
-- Nothing removed
+- Remove the "Mark Attendance" button from the top navigation bar.
+- The `AttendancePage.tsx` file can be left in place but is no longer reachable.
 
 ## Implementation Plan
-1. Backend: add `MonthlySalary` type, `monthlySalaries` list, `setSalaryForMonth`, `getSalaryForMonth` functions; update `getMonthEndReport` to use per-month salary; update `deleteEmployee` to clean monthlySalaries
-2. Update `backend.d.ts` with `setSalaryForMonth(employeeId, month, salary): Promise<boolean>` and `getSalaryForMonth(employeeId, month): Promise<bigint>`
-3. Add `useSetSalaryForMonth` and `useGetSalaryForMonth` hooks in `useQueries.ts`
-4. Update `ManagerPage.tsx`:
-   - Approval dialog: min salary = 1, show error if 0
-   - Month-End Report tab: add "Edit Salary for [Month]" button per row, opens dialog to set that month's salary
+1. Update `TopNav.tsx`: Remove the `attendance` nav item from the navItems array.
+2. Update `App.tsx`: Remove `"attendance"` from `PageId` type union and remove its case in `renderPage`. Default stays `"register"`.
+3. In `ManagerPage.tsx`, add a new `MarkAttendanceTab` component:
+   - Fetches all approved employees via `useAllEmployees` (filter by `approvalStatus === "approved"`)
+   - Fetches today's attendance via `useAllAttendance` to know who's already marked
+   - Displays a table/list with each approved employee: photo, name, ID, department
+   - Each row has a "Mark Present" button that calls `useMarkAttendance` with today's date, current time, and empty photoData
+   - Already-marked employees show a green "Present" badge and disabled button
+   - Shows today's date prominently at the top
+4. Add the new tab trigger and content in the `Dashboard` component's `Tabs`, shifting existing tab numbers as needed.
+5. Add `useMarkAttendance` import to ManagerPage (it's already in useQueries.ts).

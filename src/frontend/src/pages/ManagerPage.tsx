@@ -76,6 +76,7 @@ import {
   useApproveEmployeeWithPayment,
   useDeleteEmployee,
   useHolidays,
+  useMarkAttendance,
   useMonthEndReport,
   useRejectEmployee,
   useRemoveHoliday,
@@ -1889,6 +1890,241 @@ function HolidaysTab() {
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────
+function getCurrentTime(): string {
+  return new Date().toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+// ── Mark Attendance Tab ───────────────────────────────────
+function MarkAttendanceTab() {
+  const today = getTodayDate();
+  const { data: employees, isLoading: empLoading } = useAllEmployees();
+  const { data: allAttendance, isLoading: attLoading } = useAllAttendance();
+  const { mutateAsync: markAttendance, isPending: isMarking } =
+    useMarkAttendance();
+  const [markingId, setMarkingId] = useState<string | null>(null);
+
+  const approvedEmployees = useMemo(
+    () => (employees ?? []).filter((e) => e.approvalStatus === "approved"),
+    [employees],
+  );
+
+  const markedTodayIds = useMemo(() => {
+    if (!allAttendance) return new Set<string>();
+    return new Set(
+      allAttendance.filter((r) => r.date === today).map((r) => r.employeeId),
+    );
+  }, [allAttendance, today]);
+
+  const markedCount = approvedEmployees.filter((e) =>
+    markedTodayIds.has(e.employeeId),
+  ).length;
+  const totalApproved = approvedEmployees.length;
+
+  const isLoading = empLoading || attLoading;
+
+  const handleMarkPresent = async (employee: (typeof approvedEmployees)[0]) => {
+    setMarkingId(employee.employeeId);
+    try {
+      const result = await markAttendance({
+        name: employee.name,
+        employeeId: employee.employeeId,
+        date: today,
+        checkInTime: getCurrentTime(),
+        photoData: "",
+      });
+      if (result) {
+        toast.success(`Attendance marked for ${employee.name}`, {
+          description: `${employee.employeeId} · ${today}`,
+        });
+      } else {
+        toast.error(`Could not mark attendance for ${employee.name}`, {
+          description: "Attendance may already be marked for today.",
+        });
+      }
+    } catch {
+      toast.error("Something went wrong. Please try again.");
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
+  const formatTodayDisplay = () => {
+    try {
+      return new Date(`${today}T00:00:00`).toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } catch {
+      return today;
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div
+        className="form-section"
+        style={{ borderLeft: "3px solid oklch(var(--gold))" }}
+      >
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <UserCheck size={15} style={{ color: "oklch(var(--navy))" }} />
+              Mark Daily Attendance
+            </h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {formatTodayDisplay()}
+            </p>
+          </div>
+          <div
+            className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
+            style={{ background: "oklch(var(--navy) / 0.06)" }}
+            data-ocid="manager.mark_attendance.summary"
+          >
+            <CheckCircle2 size={15} style={{ color: "oklch(0.55 0.17 145)" }} />
+            <span>
+              <span
+                className="font-bold"
+                style={{ color: "oklch(0.55 0.17 145)" }}
+              >
+                {markedCount}
+              </span>
+              <span className="text-muted-foreground"> / {totalApproved}</span>
+              <span className="text-muted-foreground ml-1">
+                employees marked today
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div
+        className="bg-white rounded-xl border border-border overflow-hidden shadow-card"
+        data-ocid="manager.mark_attendance.table"
+      >
+        {isLoading ? (
+          <div
+            className="p-6 space-y-3"
+            data-ocid="manager.mark_attendance.loading_state"
+          >
+            {[1, 2, 3, 4, 5].map((i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : approvedEmployees.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-16 px-6 text-center"
+            data-ocid="manager.mark_attendance.empty_state"
+          >
+            <div
+              className="w-14 h-14 rounded-2xl flex items-center justify-center mb-4"
+              style={{ background: "oklch(var(--navy) / 0.06)" }}
+            >
+              <UserCheck
+                size={24}
+                style={{ color: "oklch(var(--navy) / 0.4)" }}
+              />
+            </div>
+            <p className="text-base font-semibold text-foreground mb-1">
+              No approved employees yet
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Approve employees in the Registered IDs tab first.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table className="data-table">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Employee ID</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead className="text-center">Today's Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {approvedEmployees.map((employee, idx) => {
+                  const alreadyMarked = markedTodayIds.has(employee.employeeId);
+                  const isBusy = isMarking && markingId === employee.employeeId;
+                  return (
+                    <TableRow
+                      key={employee.employeeId}
+                      data-ocid={`manager.mark_attendance.row.${idx + 1}`}
+                      className={alreadyMarked ? "bg-emerald-50/40" : undefined}
+                    >
+                      <TableCell className="font-medium text-sm">
+                        <div className="flex items-center gap-2.5">
+                          <PhotoAvatar
+                            photoData={employee.photoData}
+                            name={employee.name}
+                          />
+                          <div>
+                            <p className="font-semibold text-foreground leading-tight">
+                              {employee.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {employee.role}
+                            </p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm font-mono text-muted-foreground">
+                        {employee.employeeId}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {employee.department}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {alreadyMarked ? (
+                          <div className="flex items-center justify-center gap-1.5">
+                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-semibold text-xs">
+                              <CheckCircle2 size={11} className="mr-1" />
+                              Present
+                            </Badge>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            disabled={isBusy || isMarking}
+                            onClick={() => handleMarkPresent(employee)}
+                            className="h-8 px-4 font-semibold text-xs gap-1.5"
+                            style={{
+                              background: "oklch(var(--navy))",
+                              color: "white",
+                            }}
+                            data-ocid={`manager.mark_attendance.button.${idx + 1}`}
+                          >
+                            {isBusy ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <UserCheck size={13} />
+                            )}
+                            {isBusy ? "Marking…" : "Mark Present"}
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard ─────────────────────────────────────────────
 function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useStats();
@@ -1977,7 +2213,7 @@ function Dashboard() {
         )}
       </div>
 
-      {/* Four-Tab Panel */}
+      {/* Five-Tab Panel */}
       <Tabs defaultValue="registered-ids" className="w-full">
         <TabsList
           className="w-full mb-6 h-12"
@@ -1993,9 +2229,18 @@ function Dashboard() {
             <span className="sm:hidden">Register</span>
           </TabsTrigger>
           <TabsTrigger
-            value="attendance-view"
+            value="mark-attendance"
             className="flex-1 gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
             data-ocid="manager.tab.2"
+          >
+            <UserCheck size={15} />
+            <span className="hidden sm:inline">Mark Attendance</span>
+            <span className="sm:hidden">Mark</span>
+          </TabsTrigger>
+          <TabsTrigger
+            value="attendance-view"
+            className="flex-1 gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
+            data-ocid="manager.tab.3"
           >
             <CalendarDays size={15} />
             <span className="hidden sm:inline">Attendance View</span>
@@ -2004,7 +2249,7 @@ function Dashboard() {
           <TabsTrigger
             value="month-end"
             className="flex-1 gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
-            data-ocid="manager.tab.3"
+            data-ocid="manager.tab.4"
           >
             <BarChart3 size={15} />
             <span className="hidden sm:inline">Month-End Report</span>
@@ -2013,7 +2258,7 @@ function Dashboard() {
           <TabsTrigger
             value="holidays"
             className="flex-1 gap-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-semibold"
-            data-ocid="manager.tab.4"
+            data-ocid="manager.tab.5"
           >
             <CalendarOff size={15} />
             <span className="hidden sm:inline">Manage Holidays</span>
@@ -2023,6 +2268,9 @@ function Dashboard() {
 
         <TabsContent value="registered-ids">
           <RegisteredIdsTab />
+        </TabsContent>
+        <TabsContent value="mark-attendance">
+          <MarkAttendanceTab />
         </TabsContent>
         <TabsContent value="attendance-view">
           <AttendanceViewTab />

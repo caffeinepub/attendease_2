@@ -1,12 +1,11 @@
 import { Toaster } from "@/components/ui/sonner";
 import { useState } from "react";
 import TopNav from "./components/TopNav";
-import AttendancePage from "./pages/AttendancePage";
 import ManagerPage from "./pages/ManagerPage";
 import MyAttendancePage from "./pages/MyAttendancePage";
 import RegisterPage from "./pages/RegisterPage";
 
-export type PageId = "register" | "attendance" | "my-attendance" | "manager";
+export type PageId = "register" | "my-attendance" | "manager";
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageId>("register");
@@ -15,8 +14,6 @@ export default function App() {
     switch (activePage) {
       case "register":
         return <RegisterPage />;
-      case "attendance":
-        return <AttendancePage />;
       case "my-attendance":
         return <MyAttendancePage />;
       case "manager":

@@ -1,4 +1,4 @@
-import { Calendar, Camera, CheckCircle, Shield, UserPlus } from "lucide-react";
+import { Calendar, CheckCircle, Shield, UserPlus } from "lucide-react";
 import type { PageId } from "../App";
 
 interface TopNavProps {
@@ -17,12 +17,6 @@ const navItems: {
     label: "Register",
     icon: <UserPlus size={16} />,
     ocid: "nav.register.link",
-  },
-  {
-    id: "attendance",
-    label: "Mark Attendance",
-    icon: <Camera size={16} />,
-    ocid: "nav.attendance.link",
   },
   {
     id: "my-attendance",
