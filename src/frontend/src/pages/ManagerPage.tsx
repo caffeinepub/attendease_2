@@ -11,6 +11,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,9 +45,14 @@ import {
   CalendarOff,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
+  DollarSign,
   Download,
+  IndianRupee,
   Loader2,
+  Pencil,
   Search,
   Shield,
   Trash2,
@@ -59,11 +72,14 @@ import {
   useAllAttendance,
   useAllEmployees,
   useApproveEmployee,
+  useApproveEmployeeWithPayment,
   useDeleteEmployee,
   useHolidays,
   useMonthEndReport,
   useRejectEmployee,
   useRemoveHoliday,
+  useSetEmployeePayment,
+  useSetSalaryForMonth,
   useStats,
 } from "../hooks/useQueries";
 
@@ -252,18 +268,179 @@ function PhotoAvatar({ photoData, name }: { photoData: string; name: string }) {
   );
 }
 
+// ── Payment Dialog ─────────────────────────────────────────
+interface PaymentDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  employeeId: string;
+  employeeName: string;
+  currentPayment?: bigint;
+  mode: "approve" | "update";
+  onConfirm: (amount: bigint) => Promise<void>;
+  isPending: boolean;
+}
+
+function PaymentDialog({
+  open,
+  onOpenChange,
+  employeeId,
+  employeeName,
+  currentPayment,
+  mode,
+  onConfirm,
+  isPending,
+}: PaymentDialogProps) {
+  const [paymentInput, setPaymentInput] = useState(
+    currentPayment && currentPayment > 0n ? currentPayment.toString() : "",
+  );
+
+  const handleConfirm = async () => {
+    const amount =
+      paymentInput.trim() === "" ? 0 : Number.parseInt(paymentInput.trim(), 10);
+    if (Number.isNaN(amount) || amount < 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    if (mode === "approve" && amount <= 0) {
+      toast.error("Monthly salary is required. Please enter a valid amount.");
+      return;
+    }
+    await onConfirm(BigInt(amount));
+  };
+
+  const handleOpenChange = (newOpen: boolean) => {
+    if (!newOpen) {
+      setPaymentInput(
+        currentPayment && currentPayment > 0n ? currentPayment.toString() : "",
+      );
+    }
+    onOpenChange(newOpen);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-md" data-ocid="manager.payment_dialog">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center"
+              style={{ background: "oklch(var(--navy))" }}
+            >
+              <IndianRupee size={15} className="text-white" />
+            </div>
+            {mode === "approve"
+              ? "Approve & Set Payment"
+              : "Update Monthly Payment"}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === "approve"
+              ? `Set the monthly salary for ${employeeName} (${employeeId}) before approving.`
+              : `Update the monthly salary for ${employeeName} (${employeeId}).`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="payment-amount" className="text-sm font-semibold">
+              Monthly Salary (₹)
+            </Label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-sm">
+                ₹
+              </span>
+              <Input
+                id="payment-amount"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="e.g. 25000"
+                value={paymentInput}
+                onChange={(e) =>
+                  setPaymentInput(e.target.value.replace(/[^0-9]/g, ""))
+                }
+                className="pl-8 text-sm"
+                data-ocid="manager.payment_input"
+              />
+            </div>
+            {mode === "approve" ? (
+              <p className="text-xs text-destructive font-medium">
+                Salary is required to approve this employee.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Update the monthly salary. Changes apply to future calculations.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={isPending}
+            data-ocid="manager.payment_cancel_button"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirm}
+            disabled={isPending}
+            style={{ background: "oklch(var(--navy))", color: "white" }}
+            data-ocid="manager.payment_confirm_button"
+          >
+            {isPending ? (
+              <>
+                <Loader2 size={14} className="animate-spin mr-2" />
+                {mode === "approve" ? "Approving…" : "Saving…"}
+              </>
+            ) : mode === "approve" ? (
+              <>
+                <Check size={14} className="mr-2" />
+                Approve & Set Payment
+              </>
+            ) : (
+              <>
+                <Pencil size={14} className="mr-2" />
+                Update Payment
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Registered IDs Tab ────────────────────────────────────
 function RegisteredIdsTab() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
+  // Payment dialog state
+  const [paymentDialog, setPaymentDialog] = useState<{
+    open: boolean;
+    employeeId: string;
+    employeeName: string;
+    currentPayment: bigint;
+    mode: "approve" | "update";
+  }>({
+    open: false,
+    employeeId: "",
+    employeeName: "",
+    currentPayment: 0n,
+    mode: "approve",
+  });
+
   const { data: employees, isLoading } = useAllEmployees();
-  const { mutateAsync: approveEmployee, isPending: isApproving } =
-    useApproveEmployee();
   const { mutateAsync: rejectEmployee, isPending: isRejecting } =
     useRejectEmployee();
   const { mutateAsync: deleteEmployee, isPending: isDeleting } =
     useDeleteEmployee();
+  const { mutateAsync: approveWithPayment, isPending: isApprovingWithPayment } =
+    useApproveEmployeeWithPayment();
+  const { mutateAsync: setPayment, isPending: isSettingPayment } =
+    useSetEmployeePayment();
 
   const filtered = useMemo(() => {
     if (!employees) return [];
@@ -283,16 +460,61 @@ function RegisteredIdsTab() {
     return result;
   }, [employees, searchQuery, statusFilter]);
 
-  const handleApprove = async (employeeId: string, name: string) => {
+  const openApproveDialog = (employeeId: string, name: string) => {
+    setPaymentDialog({
+      open: true,
+      employeeId,
+      employeeName: name,
+      currentPayment: 0n,
+      mode: "approve",
+    });
+  };
+
+  const openUpdatePaymentDialog = (
+    employeeId: string,
+    name: string,
+    currentPayment: bigint,
+  ) => {
+    setPaymentDialog({
+      open: true,
+      employeeId,
+      employeeName: name,
+      currentPayment,
+      mode: "update",
+    });
+  };
+
+  const handlePaymentConfirm = async (amount: bigint) => {
+    const { employeeId, employeeName, mode } = paymentDialog;
     try {
-      const success = await approveEmployee(employeeId);
-      if (success) {
-        toast.success(`${name} approved`, {
-          description: "Employee can now mark attendance.",
+      if (mode === "approve") {
+        const success = await approveWithPayment({
+          employeeId,
+          payment: amount,
         });
+        if (success) {
+          toast.success(`${employeeName} approved`, {
+            description:
+              amount > 0n
+                ? `Monthly salary set to ₹${amount.toString()}.`
+                : "Employee can now mark attendance.",
+          });
+        } else {
+          toast.error("Could not approve employee");
+          return;
+        }
       } else {
-        toast.error("Could not approve employee");
+        const success = await setPayment({ employeeId, payment: amount });
+        if (success) {
+          toast.success("Payment updated", {
+            description: `${employeeName}'s monthly salary set to ₹${amount.toString()}.`,
+          });
+        } else {
+          toast.error("Could not update payment");
+          return;
+        }
       }
+      setPaymentDialog((prev) => ({ ...prev, open: false }));
     } catch {
       toast.error("Something went wrong");
     }
@@ -328,8 +550,22 @@ function RegisteredIdsTab() {
     }
   };
 
+  const isDialogPending = isApprovingWithPayment || isSettingPayment;
+
   return (
     <div className="space-y-5">
+      {/* Payment Dialog */}
+      <PaymentDialog
+        open={paymentDialog.open}
+        onOpenChange={(open) => setPaymentDialog((prev) => ({ ...prev, open }))}
+        employeeId={paymentDialog.employeeId}
+        employeeName={paymentDialog.employeeName}
+        currentPayment={paymentDialog.currentPayment}
+        mode={paymentDialog.mode}
+        onConfirm={handlePaymentConfirm}
+        isPending={isDialogPending}
+      />
+
       {/* Filters */}
       <div className="form-section">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -406,6 +642,7 @@ function RegisteredIdsTab() {
                   <TableHead>Role</TableHead>
                   <TableHead>Registered</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Monthly Pay</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -448,6 +685,21 @@ function RegisteredIdsTab() {
                     <TableCell>
                       <StatusBadge status={employee.approvalStatus} />
                     </TableCell>
+                    <TableCell className="text-sm">
+                      {employee.monthlyPayment &&
+                      employee.monthlyPayment > 0n ? (
+                        <span
+                          className="font-semibold"
+                          style={{ color: "oklch(0.55 0.17 145)" }}
+                        >
+                          ₹{employee.monthlyPayment.toString()}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground italic text-xs">
+                          Not set
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5">
                         {employee.approvalStatus === "pending" && (
@@ -456,26 +708,23 @@ function RegisteredIdsTab() {
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50"
-                              disabled={isApproving || isRejecting}
+                              disabled={isDialogPending || isRejecting}
                               onClick={() =>
-                                handleApprove(
+                                openApproveDialog(
                                   employee.employeeId,
                                   employee.name,
                                 )
                               }
                               data-ocid={`manager.approve_button.${idx + 1}`}
+                              title="Approve & set payment"
                             >
-                              {isApproving ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <Check size={13} />
-                              )}
+                              <Check size={13} />
                             </Button>
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-7 px-2 text-red-700 hover:text-red-800 hover:bg-red-50"
-                              disabled={isApproving || isRejecting}
+                              disabled={isDialogPending || isRejecting}
                               onClick={() =>
                                 handleReject(employee.employeeId, employee.name)
                               }
@@ -488,6 +737,25 @@ function RegisteredIdsTab() {
                               )}
                             </Button>
                           </>
+                        )}
+                        {employee.approvalStatus === "approved" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            disabled={isDialogPending}
+                            onClick={() =>
+                              openUpdatePaymentDialog(
+                                employee.employeeId,
+                                employee.name,
+                                employee.monthlyPayment ?? 0n,
+                              )
+                            }
+                            data-ocid={`manager.edit_button.${idx + 1}`}
+                            title="Update monthly payment"
+                          >
+                            <Pencil size={13} />
+                          </Button>
                         )}
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
@@ -757,11 +1025,51 @@ function AttendanceViewTab() {
   );
 }
 
+// ── Day Badge for Month-End Report ────────────────────────
+function DayBadge({ dateStr }: { dateStr: string }) {
+  try {
+    const d = new Date(`${dateStr}T00:00:00`);
+    const dayName = d.toLocaleDateString("en-US", { weekday: "short" });
+    const dayNum = d.getDate();
+    return (
+      <span className="inline-flex flex-col items-center justify-center px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-semibold min-w-[44px]">
+        <span className="text-emerald-600 text-[10px] leading-tight">
+          {dayName}
+        </span>
+        <span className="text-sm font-bold leading-tight">{dayNum}</span>
+      </span>
+    );
+  } catch {
+    return (
+      <span className="inline-flex items-center justify-center px-2 py-1 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-semibold">
+        {dateStr}
+      </span>
+    );
+  }
+}
+
 // ── Month-End Report Tab ──────────────────────────────────
 function MonthEndReportTab() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  // Month salary dialog state
+  const [monthlySalaryDialog, setMonthlySalaryDialog] = useState<{
+    open: boolean;
+    employeeId: string;
+    employeeName: string;
+    currentSalary: bigint;
+  }>({
+    open: false,
+    employeeId: "",
+    employeeName: "",
+    currentSalary: 0n,
+  });
+  const [monthlySalaryInput, setMonthlySalaryInput] = useState("");
 
   const { data: report, isLoading } = useMonthEndReport(selectedMonth);
+  const { mutateAsync: setSalaryForMonth, isPending: isSettingSalary } =
+    useSetSalaryForMonth();
 
   const totalPresent = report
     ? report.reduce((sum, r) => sum + Number(r.presentDays), 0)
@@ -781,8 +1089,179 @@ function MonthEndReportTab() {
     return "bg-red-100 text-red-800 border-red-200";
   };
 
+  const toggleRow = (employeeId: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(employeeId)) {
+        next.delete(employeeId);
+      } else {
+        next.add(employeeId);
+      }
+      return next;
+    });
+  };
+
+  const getDailyRate = (
+    monthlyPayment: bigint,
+    totalWorkingDays: bigint,
+  ): string => {
+    if (monthlyPayment === 0n || totalWorkingDays === 0n) return "—";
+    const rate = Number(monthlyPayment) / Number(totalWorkingDays);
+    return `₹${rate.toFixed(2)}`;
+  };
+
+  const getMonthDisplayName = (monthStr: string): string => {
+    try {
+      const [year, month] = monthStr.split("-");
+      const d = new Date(Number(year), Number(month) - 1, 1);
+      return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    } catch {
+      return monthStr;
+    }
+  };
+
+  const openMonthlySalaryDialog = (
+    employeeId: string,
+    employeeName: string,
+    currentSalary: bigint,
+  ) => {
+    setMonthlySalaryInput(currentSalary > 0n ? currentSalary.toString() : "");
+    setMonthlySalaryDialog({
+      open: true,
+      employeeId,
+      employeeName,
+      currentSalary,
+    });
+  };
+
+  const handleMonthlySalaryConfirm = async () => {
+    const amount =
+      monthlySalaryInput.trim() === ""
+        ? 0
+        : Number.parseInt(monthlySalaryInput.trim(), 10);
+    if (Number.isNaN(amount) || amount <= 0) {
+      toast.error("Please enter a valid salary amount (minimum ₹1).");
+      return;
+    }
+    try {
+      await setSalaryForMonth({
+        employeeId: monthlySalaryDialog.employeeId,
+        month: selectedMonth,
+        salary: BigInt(amount),
+      });
+      toast.success(
+        `${monthlySalaryDialog.employeeName}'s salary for ${getMonthDisplayName(selectedMonth)} set to ₹${amount}`,
+      );
+      setMonthlySalaryDialog((prev) => ({ ...prev, open: false }));
+    } catch {
+      toast.error("Failed to set salary. Please try again.");
+    }
+  };
+
   return (
     <div className="space-y-5">
+      {/* Monthly Salary Dialog */}
+      <Dialog
+        open={monthlySalaryDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMonthlySalaryInput(
+              monthlySalaryDialog.currentSalary > 0n
+                ? monthlySalaryDialog.currentSalary.toString()
+                : "",
+            );
+          }
+          setMonthlySalaryDialog((prev) => ({ ...prev, open }));
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-md"
+          data-ocid="manager.monthly_salary_dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: "oklch(var(--navy))" }}
+              >
+                <IndianRupee size={15} className="text-white" />
+              </div>
+              Set Salary for {getMonthDisplayName(selectedMonth)}
+            </DialogTitle>
+            <DialogDescription>
+              Set the monthly salary for{" "}
+              <strong>{monthlySalaryDialog.employeeName}</strong> (
+              {monthlySalaryDialog.employeeId}) for{" "}
+              {getMonthDisplayName(selectedMonth)}. This overrides the salary
+              only for this specific month.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="monthly-salary-amount"
+                className="text-sm font-semibold"
+              >
+                Monthly Salary for {getMonthDisplayName(selectedMonth)} (₹)
+              </Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-semibold text-sm">
+                  ₹
+                </span>
+                <Input
+                  id="monthly-salary-amount"
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="e.g. 25000"
+                  value={monthlySalaryInput}
+                  onChange={(e) =>
+                    setMonthlySalaryInput(e.target.value.replace(/[^0-9]/g, ""))
+                  }
+                  className="pl-8 text-sm"
+                  data-ocid="manager.monthly_salary_input"
+                />
+              </div>
+              <p className="text-xs text-destructive font-medium">
+                Salary is required. Minimum ₹1.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() =>
+                setMonthlySalaryDialog((prev) => ({ ...prev, open: false }))
+              }
+              disabled={isSettingSalary}
+              data-ocid="manager.monthly_salary_cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleMonthlySalaryConfirm}
+              disabled={isSettingSalary}
+              style={{ background: "oklch(var(--navy))", color: "white" }}
+              data-ocid="manager.monthly_salary_confirm_button"
+            >
+              {isSettingSalary ? (
+                <>
+                  <Loader2 size={14} className="animate-spin mr-2" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  <IndianRupee size={14} className="mr-2" />
+                  Set Salary
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Month Picker */}
       <div className="form-section">
         <div className="flex items-center gap-4">
@@ -861,6 +1340,7 @@ function MonthEndReportTab() {
             <Table className="data-table">
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-8" />
                   <TableHead>Employee Name</TableHead>
                   <TableHead>Employee ID</TableHead>
                   <TableHead>Department</TableHead>
@@ -868,6 +1348,9 @@ function MonthEndReportTab() {
                   <TableHead className="text-center">Absent Days</TableHead>
                   <TableHead className="text-center">
                     Total Working Days
+                  </TableHead>
+                  <TableHead className="text-center">
+                    Monthly Pay (this month)
                   </TableHead>
                   <TableHead className="text-center">Attendance %</TableHead>
                 </TableRow>
@@ -878,54 +1361,227 @@ function MonthEndReportTab() {
                     row.presentDays,
                     row.totalWorkingDays,
                   );
+                  const isExpanded = expandedRows.has(row.employeeId);
                   return (
-                    <TableRow
-                      key={`${row.employeeId}-${selectedMonth}`}
-                      data-ocid={`manager.report_table.row.${idx + 1}`}
-                    >
-                      <TableCell className="font-medium text-sm">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                            style={{ background: "oklch(var(--navy))" }}
+                    <>
+                      <TableRow
+                        key={`${row.employeeId}-${selectedMonth}`}
+                        className="cursor-pointer hover:bg-muted/30 transition-colors"
+                        onClick={() => toggleRow(row.employeeId)}
+                        data-ocid={`manager.report_table.row.${idx + 1}`}
+                      >
+                        <TableCell className="py-3">
+                          <button
+                            type="button"
+                            className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-foreground transition-colors"
+                            aria-label={isExpanded ? "Collapse" : "Expand"}
+                            data-ocid={`manager.report_table.toggle.${idx + 1}`}
                           >
-                            {row.employeeName.charAt(0).toUpperCase()}
+                            {isExpanded ? (
+                              <ChevronDown size={15} />
+                            ) : (
+                              <ChevronRight size={15} />
+                            )}
+                          </button>
+                        </TableCell>
+                        <TableCell className="font-medium text-sm">
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                              style={{ background: "oklch(var(--navy))" }}
+                            >
+                              {row.employeeName.charAt(0).toUpperCase()}
+                            </div>
+                            {row.employeeName}
                           </div>
-                          {row.employeeName}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm font-mono text-muted-foreground">
-                        {row.employeeId}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {row.department}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span
-                          className="text-sm font-semibold"
-                          style={{ color: "oklch(0.55 0.17 145)" }}
+                        </TableCell>
+                        <TableCell className="text-sm font-mono text-muted-foreground">
+                          {row.employeeId}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.department}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span
+                            className="text-sm font-semibold"
+                            style={{ color: "oklch(0.55 0.17 145)" }}
+                          >
+                            {row.presentDays.toString()}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-sm font-semibold text-destructive">
+                            {row.absentDays.toString()}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <span className="text-sm text-muted-foreground">
+                            {row.totalWorkingDays.toString()}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            {row.earnedAmount > 0n ||
+                            row.monthlyPayment > 0n ? (
+                              <div className="flex flex-col items-center">
+                                <span
+                                  className="text-sm font-bold"
+                                  style={{ color: "oklch(0.55 0.17 145)" }}
+                                >
+                                  ₹{row.earnedAmount.toString()}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                  / ₹{row.monthlyPayment.toString()}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">
+                                Not set
+                              </span>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 text-xs gap-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openMonthlySalaryDialog(
+                                  row.employeeId,
+                                  row.employeeName,
+                                  row.monthlyPayment,
+                                );
+                              }}
+                              data-ocid={`manager.report_table.edit_button.${idx + 1}`}
+                              title={`Set salary for ${getMonthDisplayName(selectedMonth)}`}
+                            >
+                              <Pencil size={11} />
+                              <span className="hidden sm:inline">Set</span>
+                            </Button>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Badge
+                            className={`font-semibold text-xs border ${getPctBadgeClass(pct)}`}
+                          >
+                            {pct}%
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+
+                      {/* Expanded Detail Row */}
+                      {isExpanded && (
+                        <TableRow
+                          key={`${row.employeeId}-${selectedMonth}-expanded`}
+                          className="bg-slate-50/70"
                         >
-                          {row.presentDays.toString()}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-sm font-semibold text-destructive">
-                          {row.absentDays.toString()}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <span className="text-sm text-muted-foreground">
-                          {row.totalWorkingDays.toString()}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge
-                          className={`font-semibold text-xs border ${getPctBadgeClass(pct)}`}
-                        >
-                          {pct}%
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
+                          <TableCell colSpan={9} className="py-0">
+                            <div className="px-4 py-4 space-y-4">
+                              {/* Day-by-day attendance grid */}
+                              <div>
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                                  <CalendarDays size={12} />
+                                  Days Present — {selectedMonth}
+                                </p>
+                                {row.presentDates &&
+                                row.presentDates.length > 0 ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {row.presentDates
+                                      .slice()
+                                      .sort()
+                                      .map((dateStr) => (
+                                        <DayBadge
+                                          key={dateStr}
+                                          dateStr={dateStr}
+                                        />
+                                      ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-muted-foreground italic">
+                                    No attendance recorded for this month.
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Payment summary card */}
+                              <div
+                                className="rounded-lg border border-border bg-white p-4"
+                                style={{
+                                  boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+                                }}
+                              >
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                                  <DollarSign size={12} />
+                                  Payment Summary
+                                </p>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-muted-foreground">
+                                      Monthly Salary
+                                    </p>
+                                    <p className="text-sm font-semibold">
+                                      {row.monthlyPayment > 0n ? (
+                                        `₹${row.monthlyPayment.toString()}`
+                                      ) : (
+                                        <span className="italic text-muted-foreground">
+                                          Not set
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-muted-foreground">
+                                      Total Working Days
+                                    </p>
+                                    <p className="text-sm font-semibold">
+                                      {row.totalWorkingDays.toString()}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-muted-foreground">
+                                      Days Present
+                                    </p>
+                                    <p
+                                      className="text-sm font-semibold"
+                                      style={{ color: "oklch(0.55 0.17 145)" }}
+                                    >
+                                      {row.presentDays.toString()}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-muted-foreground">
+                                      Daily Rate
+                                    </p>
+                                    <p className="text-sm font-semibold text-blue-600">
+                                      {getDailyRate(
+                                        row.monthlyPayment,
+                                        row.totalWorkingDays,
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="space-y-0.5">
+                                    <p className="text-xs text-muted-foreground">
+                                      Earned This Month
+                                    </p>
+                                    <p
+                                      className="text-base font-bold"
+                                      style={{ color: "oklch(0.55 0.17 145)" }}
+                                    >
+                                      {row.monthlyPayment > 0n ? (
+                                        `₹${row.earnedAmount.toString()}`
+                                      ) : (
+                                        <span className="italic text-sm text-muted-foreground">
+                                          —
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
                   );
                 })}
               </TableBody>

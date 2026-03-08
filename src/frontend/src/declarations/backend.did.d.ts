@@ -25,6 +25,7 @@ export interface Employee {
   'role' : string,
   'approvalStatus' : string,
   'employeeId' : string,
+  'monthlyPayment' : bigint,
   'department' : string,
   'registeredAt' : string,
 }
@@ -33,9 +34,12 @@ export interface MonthEndReport {
   'employeeName' : string,
   'presentDays' : bigint,
   'employeeId' : string,
+  'monthlyPayment' : bigint,
   'absentDays' : bigint,
   'totalWorkingDays' : bigint,
   'department' : string,
+  'earnedAmount' : bigint,
+  'presentDates' : Array<string>,
 }
 export interface Stats {
   'totalEmployees' : bigint,
@@ -46,6 +50,7 @@ export interface Stats {
 export interface _SERVICE {
   'addHoliday' : ActorMethod<[string, string], boolean>,
   'approveEmployee' : ActorMethod<[string], boolean>,
+  'approveEmployeeWithPayment' : ActorMethod<[string, bigint], boolean>,
   'checkIfAttendanceMarkedToday' : ActorMethod<[string, string], boolean>,
   'deleteEmployee' : ActorMethod<[string], boolean>,
   'getAllAttendance' : ActorMethod<[], Array<AttendanceRecord>>,
@@ -57,6 +62,7 @@ export interface _SERVICE {
   'getMonthEndReport' : ActorMethod<[string], Array<MonthEndReport>>,
   'getPendingEmployees' : ActorMethod<[], Array<Employee>>,
   'getRecentAttendance' : ActorMethod<[bigint], Array<AttendanceRecord>>,
+  'getSalaryForMonth' : ActorMethod<[string, string], bigint>,
   'getStats' : ActorMethod<[string, string], Stats>,
   'markAttendance' : ActorMethod<
     [string, string, string, string, string],
@@ -68,6 +74,8 @@ export interface _SERVICE {
   >,
   'rejectEmployee' : ActorMethod<[string], boolean>,
   'removeHoliday' : ActorMethod<[string], boolean>,
+  'setEmployeePayment' : ActorMethod<[string, bigint], boolean>,
+  'setSalaryForMonth' : ActorMethod<[string, string, bigint], boolean>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

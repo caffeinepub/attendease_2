@@ -1,40 +1,35 @@
 # AttendEase
 
 ## Current State
-Full-stack employee attendance app with:
-- Employee registration (photo capture, department, role) with manager approval workflow
-- Mark Attendance (camera photo capture, approved employees only, one check-in per day)
-- My Attendance page (view attendance history by employee ID)
-- Manager Portal (PIN: 1234) with 3 tabs: Registered IDs, Attendance View, Month-End Report
-- Month-End Report calculates totalWorkingDays as all calendar days in the month (no weekend exclusions)
-- No holiday management exists
+Full employee attendance management app with:
+- Employee registration (photo, name, ID, department, role)
+- Manager approval workflow (approve with salary, reject, delete)
+- Attendance marking with face photo
+- Manager portal (PIN: 1234) with 4 tabs: Registered IDs, Attendance View, Month-End Report, Holidays
+- Single global monthlyPayment per employee
+- Per-month salary can be set at approval time or updated via pencil icon
 
 ## Requested Changes (Diff)
 
 ### Add
-- `Holiday` type in backend: `{ date: Text; reason: Text }`
-- `addHoliday(date, reason)` backend function -- manager adds a holiday by date (YYYY-MM-DD) and optional reason
-- `removeHoliday(date)` backend function -- manager removes a holiday by date
-- `getHolidays()` backend function -- returns all holidays as array
-- `getHolidaysByMonth(month)` backend function -- returns holidays for a given month (YYYY-MM)
-- Month-End Report logic: totalWorkingDays = calendar days in month MINUS holidays in that month; absentDays = totalWorkingDays - presentDays (min 0)
-- "Holidays" tab (4th tab) in Manager Portal where manager can:
-  - Pick a date and enter a reason to add a holiday
-  - See a list of all holidays with date, reason, and a delete button
-- Holiday dates shown with a "Holiday" badge in Attendance View table
-- Frontend hooks: `useHolidays`, `useHolidaysByMonth`, `useAddHoliday`, `useRemoveHoliday`
+- Per-month salary storage: `setSalaryForMonth(employeeId, month, salary)` — stores a salary for a specific employee for a specific month (YYYY-MM format)
+- `getSalaryForMonth(employeeId, month)` — returns the salary for that month, falling back to employee's default `monthlyPayment` if not set
+- Month-End Report tab: "Set/Edit Salary for Month" button per employee row to set or override the salary for that specific selected month
+- Salary is mandatory on approval: input must be >= 1 (no longer allows 0 or empty)
 
 ### Modify
-- `getMonthEndReport(month)`: subtract holiday count for that month from totalWorkingDays before computing absentDays
-- Manager Portal: add 4th tab "Holidays" alongside Registered IDs, Attendance View, Month-End Report
-- Attendance View table: if a date matches a holiday, show "Holiday" badge instead of "Present"
+- `getMonthEndReport`: use per-month salary override if set for that month, otherwise fall back to employee's default `monthlyPayment`
+- `deleteEmployee`: also clean up any `monthlySalaries` records for that employee
+- Approval payment dialog: make salary field required (min = 1, validation error if 0 or empty)
+- Month-End Report tab: show "Edit Salary" pencil button per row that opens a dialog to set the salary for the selected month
 
 ### Remove
 - Nothing removed
 
 ## Implementation Plan
-1. Regenerate Motoko backend with Holiday type, addHoliday/removeHoliday/getHolidays/getHolidaysByMonth functions, and updated getMonthEndReport
-2. Add holiday hooks (useHolidays, useHolidaysByMonth, useAddHoliday, useRemoveHoliday) to useQueries.ts
-3. Add Holidays tab to ManagerPage.tsx with date picker + reason input + holiday list table with remove buttons
-4. Update Attendance View to show "Holiday" badge when a record date matches a holiday
-5. Validate and deploy
+1. Backend: add `MonthlySalary` type, `monthlySalaries` list, `setSalaryForMonth`, `getSalaryForMonth` functions; update `getMonthEndReport` to use per-month salary; update `deleteEmployee` to clean monthlySalaries
+2. Update `backend.d.ts` with `setSalaryForMonth(employeeId, month, salary): Promise<boolean>` and `getSalaryForMonth(employeeId, month): Promise<bigint>`
+3. Add `useSetSalaryForMonth` and `useGetSalaryForMonth` hooks in `useQueries.ts`
+4. Update `ManagerPage.tsx`:
+   - Approval dialog: min salary = 1, show error if 0
+   - Month-End Report tab: add "Edit Salary for [Month]" button per row, opens dialog to set that month's salary

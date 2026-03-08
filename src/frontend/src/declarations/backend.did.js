@@ -23,6 +23,7 @@ export const Employee = IDL.Record({
   'role' : IDL.Text,
   'approvalStatus' : IDL.Text,
   'employeeId' : IDL.Text,
+  'monthlyPayment' : IDL.Nat,
   'department' : IDL.Text,
   'registeredAt' : IDL.Text,
 });
@@ -31,9 +32,12 @@ export const MonthEndReport = IDL.Record({
   'employeeName' : IDL.Text,
   'presentDays' : IDL.Nat,
   'employeeId' : IDL.Text,
+  'monthlyPayment' : IDL.Nat,
   'absentDays' : IDL.Nat,
   'totalWorkingDays' : IDL.Nat,
   'department' : IDL.Text,
+  'earnedAmount' : IDL.Nat,
+  'presentDates' : IDL.Vec(IDL.Text),
 });
 export const Stats = IDL.Record({
   'totalEmployees' : IDL.Nat,
@@ -45,6 +49,7 @@ export const Stats = IDL.Record({
 export const idlService = IDL.Service({
   'addHoliday' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
   'approveEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
+  'approveEmployeeWithPayment' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Bool], []),
   'checkIfAttendanceMarkedToday' : IDL.Func(
       [IDL.Text, IDL.Text],
       [IDL.Bool],
@@ -72,6 +77,7 @@ export const idlService = IDL.Service({
       [IDL.Vec(AttendanceRecord)],
       ['query'],
     ),
+  'getSalaryForMonth' : IDL.Func([IDL.Text, IDL.Text], [IDL.Nat], ['query']),
   'getStats' : IDL.Func([IDL.Text, IDL.Text], [Stats], ['query']),
   'markAttendance' : IDL.Func(
       [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
@@ -85,6 +91,8 @@ export const idlService = IDL.Service({
     ),
   'rejectEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
   'removeHoliday' : IDL.Func([IDL.Text], [IDL.Bool], []),
+  'setEmployeePayment' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Bool], []),
+  'setSalaryForMonth' : IDL.Func([IDL.Text, IDL.Text, IDL.Nat], [IDL.Bool], []),
 });
 
 export const idlInitArgs = [];
@@ -105,6 +113,7 @@ export const idlFactory = ({ IDL }) => {
     'role' : IDL.Text,
     'approvalStatus' : IDL.Text,
     'employeeId' : IDL.Text,
+    'monthlyPayment' : IDL.Nat,
     'department' : IDL.Text,
     'registeredAt' : IDL.Text,
   });
@@ -113,9 +122,12 @@ export const idlFactory = ({ IDL }) => {
     'employeeName' : IDL.Text,
     'presentDays' : IDL.Nat,
     'employeeId' : IDL.Text,
+    'monthlyPayment' : IDL.Nat,
     'absentDays' : IDL.Nat,
     'totalWorkingDays' : IDL.Nat,
     'department' : IDL.Text,
+    'earnedAmount' : IDL.Nat,
+    'presentDates' : IDL.Vec(IDL.Text),
   });
   const Stats = IDL.Record({
     'totalEmployees' : IDL.Nat,
@@ -127,6 +139,11 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     'addHoliday' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
     'approveEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
+    'approveEmployeeWithPayment' : IDL.Func(
+        [IDL.Text, IDL.Nat],
+        [IDL.Bool],
+        [],
+      ),
     'checkIfAttendanceMarkedToday' : IDL.Func(
         [IDL.Text, IDL.Text],
         [IDL.Bool],
@@ -154,6 +171,7 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(AttendanceRecord)],
         ['query'],
       ),
+    'getSalaryForMonth' : IDL.Func([IDL.Text, IDL.Text], [IDL.Nat], ['query']),
     'getStats' : IDL.Func([IDL.Text, IDL.Text], [Stats], ['query']),
     'markAttendance' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
@@ -167,6 +185,12 @@ export const idlFactory = ({ IDL }) => {
       ),
     'rejectEmployee' : IDL.Func([IDL.Text], [IDL.Bool], []),
     'removeHoliday' : IDL.Func([IDL.Text], [IDL.Bool], []),
+    'setEmployeePayment' : IDL.Func([IDL.Text, IDL.Nat], [IDL.Bool], []),
+    'setSalaryForMonth' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Nat],
+        [IDL.Bool],
+        [],
+      ),
   });
 };
 

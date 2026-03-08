@@ -176,6 +176,42 @@ export function useApproveEmployee() {
   });
 }
 
+// ── Approve Employee with Payment mutation ─────────────────
+export function useApproveEmployeeWithPayment() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { employeeId: string; payment: bigint }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.approveEmployeeWithPayment(
+        params.employeeId,
+        params.payment,
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["allEmployees"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["monthEndReport"] });
+    },
+  });
+}
+
+// ── Set Employee Payment mutation ──────────────────────────
+export function useSetEmployeePayment() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: { employeeId: string; payment: bigint }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.setEmployeePayment(params.employeeId, params.payment);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["allEmployees"] });
+      qc.invalidateQueries({ queryKey: ["monthEndReport"] });
+    },
+  });
+}
+
 // ── Reject Employee mutation ───────────────────────────────
 export function useRejectEmployee() {
   const { actor } = useActor();
@@ -284,6 +320,30 @@ export function useRemoveHoliday() {
       qc.invalidateQueries({ queryKey: ["holidays"] });
       qc.invalidateQueries({ queryKey: ["holidaysByMonth"] });
       qc.invalidateQueries({ queryKey: ["monthEndReport"] });
+    },
+  });
+}
+
+// ── Set Salary for Month mutation ──────────────────────────
+export function useSetSalaryForMonth() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: {
+      employeeId: string;
+      month: string;
+      salary: bigint;
+    }) => {
+      if (!actor) throw new Error("Not connected");
+      return actor.setSalaryForMonth(
+        params.employeeId,
+        params.month,
+        params.salary,
+      );
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["monthEndReport"] });
+      qc.invalidateQueries({ queryKey: ["allEmployees"] });
     },
   });
 }

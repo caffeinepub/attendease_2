@@ -101,6 +101,7 @@ export interface Employee {
     role: string;
     approvalStatus: string;
     employeeId: string;
+    monthlyPayment: bigint;
     department: string;
     registeredAt: string;
 }
@@ -117,9 +118,12 @@ export interface MonthEndReport {
     employeeName: string;
     presentDays: bigint;
     employeeId: string;
+    monthlyPayment: bigint;
     absentDays: bigint;
     totalWorkingDays: bigint;
     department: string;
+    earnedAmount: bigint;
+    presentDates: Array<string>;
 }
 export interface Holiday {
     date: string;
@@ -128,6 +132,7 @@ export interface Holiday {
 export interface backendInterface {
     addHoliday(date: string, reason: string): Promise<boolean>;
     approveEmployee(employeeId: string): Promise<boolean>;
+    approveEmployeeWithPayment(employeeId: string, payment: bigint): Promise<boolean>;
     checkIfAttendanceMarkedToday(employeeId: string, date: string): Promise<boolean>;
     deleteEmployee(employeeId: string): Promise<boolean>;
     getAllAttendance(): Promise<Array<AttendanceRecord>>;
@@ -139,11 +144,14 @@ export interface backendInterface {
     getMonthEndReport(month: string): Promise<Array<MonthEndReport>>;
     getPendingEmployees(): Promise<Array<Employee>>;
     getRecentAttendance(limit: bigint): Promise<Array<AttendanceRecord>>;
+    getSalaryForMonth(employeeId: string, month: string): Promise<bigint>;
     getStats(date: string, month: string): Promise<Stats>;
     markAttendance(name: string, employeeId: string, date: string, checkInTime: string, photoData: string): Promise<boolean>;
     registerEmployee(name: string, employeeId: string, department: string, role: string, photoData: string): Promise<boolean>;
     rejectEmployee(employeeId: string): Promise<boolean>;
     removeHoliday(date: string): Promise<boolean>;
+    setEmployeePayment(employeeId: string, payment: bigint): Promise<boolean>;
+    setSalaryForMonth(employeeId: string, month: string, salary: bigint): Promise<boolean>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
@@ -172,6 +180,20 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.approveEmployee(arg0);
+            return result;
+        }
+    }
+    async approveEmployeeWithPayment(arg0: string, arg1: bigint): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.approveEmployeeWithPayment(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.approveEmployeeWithPayment(arg0, arg1);
             return result;
         }
     }
@@ -329,6 +351,20 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async getSalaryForMonth(arg0: string, arg1: string): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getSalaryForMonth(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getSalaryForMonth(arg0, arg1);
+            return result;
+        }
+    }
     async getStats(arg0: string, arg1: string): Promise<Stats> {
         if (this.processError) {
             try {
@@ -396,6 +432,34 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.removeHoliday(arg0);
+            return result;
+        }
+    }
+    async setEmployeePayment(arg0: string, arg1: bigint): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setEmployeePayment(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setEmployeePayment(arg0, arg1);
+            return result;
+        }
+    }
+    async setSalaryForMonth(arg0: string, arg1: string, arg2: bigint): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.setSalaryForMonth(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.setSalaryForMonth(arg0, arg1, arg2);
             return result;
         }
     }

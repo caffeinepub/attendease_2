@@ -1,13 +1,14 @@
 import Array "mo:core/Array";
+import List "mo:core/List";
 import Nat "mo:core/Nat";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
+import Int "mo:core/Int";
 import Iter "mo:core/Iter";
-import Order "mo:core/Order";
-import List "mo:core/List";
 import Migration "migration";
 
-(with migration = Migration.run) actor {
+(with migration = Migration.run)
+actor {
   type Employee = {
     employeeId : Text;
     name : Text;
@@ -16,6 +17,7 @@ import Migration "migration";
     photoData : Text;
     registeredAt : Text;
     approvalStatus : Text;
+    monthlyPayment : Nat;
   };
 
   type AttendanceRecord = {
@@ -33,6 +35,12 @@ import Migration "migration";
     reason : Text;
   };
 
+  type MonthlySalary = {
+    employeeId : Text;
+    month : Text;
+    salary : Nat;
+  };
+
   type Stats = {
     totalEmployees : Nat;
     pendingEmployees : Nat;
@@ -47,36 +55,165 @@ import Migration "migration";
     presentDays : Nat;
     absentDays : Nat;
     totalWorkingDays : Nat;
+    monthlyPayment : Nat;
+    earnedAmount : Nat;
+    presentDates : [Text];
   };
 
   // Module for ordering AttendanceRecords
   module AttendanceRecord {
-    public func compare(a : AttendanceRecord, b : AttendanceRecord) : Order.Order {
+    public func compare(a : AttendanceRecord, b : AttendanceRecord) : Int {
       switch (Text.compare(b.date, a.date)) {
-        case (#less) { #less };
-        case (#greater) { #greater };
-        case (#equal) { Text.compare(a.employeeName, b.employeeName) };
+        case (#less) { -1 };
+        case (#greater) { 1 };
+        case (#equal) {
+          switch (Text.compare(a.employeeName, b.employeeName)) {
+            case (#equal) { 0 };
+            case (#greater) { 1 };
+            case (#less) { -1 };
+          };
+        };
       };
     };
   };
 
   // Module for ordering Employee by name
   module Employee {
-    public func compareByName(a : Employee, b : Employee) : Order.Order {
-      Text.compare(a.name, b.name);
+    public func compareByName(a : Employee, b : Employee) : Int {
+      switch (Text.compare(a.name, b.name)) {
+        case (#equal) { 0 };
+        case (#greater) { 1 };
+        case (#less) { -1 };
+      };
     };
   };
 
   // Module for ordering Holiday by date
   module Holiday {
-    public func compareByDate(a : Holiday, b : Holiday) : Order.Order {
-      Text.compare(a.date, b.date);
+    public func compareByDate(a : Holiday, b : Holiday) : Int {
+      switch (Text.compare(a.date, b.date)) {
+        case (#equal) { 0 };
+        case (#greater) { 1 };
+        case (#less) { -1 };
+      };
     };
   };
 
   var employees : List.List<Employee> = List.empty<Employee>();
   var attendanceRecords : List.List<AttendanceRecord> = List.empty<AttendanceRecord>();
   var holidays : List.List<Holiday> = List.empty<Holiday>();
+  var monthlySalaries : List.List<MonthlySalary> = List.empty<MonthlySalary>();
+
+  /////////////////////////////////////////////////////////////////////////
+  // New Per-Month Salary Functions
+  /////////////////////////////////////////////////////////////////////////
+
+  // Set/Update Monthly Salary for an Employee
+  public shared ({ caller }) func setSalaryForMonth(employeeId : Text, month : Text, salary : Nat) : async Bool {
+    monthlySalaries := monthlySalaries.filter(
+      func(entry) {
+        not (entry.employeeId == employeeId and entry.month == month);
+      }
+    );
+    monthlySalaries.add({
+      employeeId;
+      month;
+      salary;
+    });
+    true;
+  };
+
+  // Get per-month salary, falling back to employee default if not set
+  public query ({ caller }) func getSalaryForMonth(employeeId : Text, month : Text) : async Nat {
+    switch (
+      monthlySalaries.values().find(
+        func(entry) {
+          entry.employeeId == employeeId and entry.month == month
+        }
+      )
+    ) {
+      case (?entry) { entry.salary };
+      case (null) {
+        // Fallback to employee default
+        switch (employees.values().find(func(e) { e.employeeId == employeeId })) {
+          case (?employee) {
+            employee.monthlyPayment;
+          };
+          case (null) { 0 };
+        };
+      };
+    };
+  };
+
+  // Helper to get monthly salary or fallback
+  func getMonthlySalaryOrFallback(employeeId : Text, month : Text) : Nat {
+    switch (
+      monthlySalaries.values().find(func(entry) { entry.employeeId == employeeId and entry.month == month })
+    ) {
+      case (?entry) { entry.salary };
+      case (null) {
+        switch (employees.values().find(func(e) { e.employeeId == employeeId })) {
+          case (?employee) { employee.monthlyPayment };
+          case (null) { 0 };
+        };
+      };
+    };
+  };
+
+  // Delete Employee and their records + monthly salaries
+  public shared ({ caller }) func deleteEmployee(employeeId : Text) : async Bool {
+    let hasEmployee = employees.values().any(
+      func(e) { e.employeeId == employeeId }
+    );
+    if (not hasEmployee) { return false };
+
+    employees := employees.filter(func(e) { e.employeeId != employeeId });
+    attendanceRecords := attendanceRecords.filter(func(record) { record.employeeId != employeeId });
+    monthlySalaries := monthlySalaries.filter(func(entry) { entry.employeeId != employeeId });
+    true;
+  };
+
+  /////////////////////////////////////////////////////////////////////////
+  // Old Functions
+  /////////////////////////////////////////////////////////////////////////
+
+  // Approve and Set Payment for Employee
+  public shared ({ caller }) func approveEmployeeWithPayment(employeeId : Text, payment : Nat) : async Bool {
+    var updated = false; // Track if employee was found and updated
+    let newEmployees = employees.map<Employee, Employee>(
+      func(emp) {
+        if (emp.employeeId == employeeId) {
+          updated := true;
+          {
+            emp with
+            approvalStatus = "approved";
+            monthlyPayment = payment;
+          };
+        } else { emp };
+      }
+    );
+    employees := newEmployees;
+    updated;
+  };
+
+  // Set/Update Monthly Payment for an Employee
+  public shared ({ caller }) func setEmployeePayment(employeeId : Text, payment : Nat) : async Bool {
+    var updated = false;
+    let newEmployees = employees.map<Employee, Employee>(
+      func(emp) {
+        if (emp.employeeId == employeeId) {
+          updated := true;
+          { emp with monthlyPayment = payment };
+        } else { emp };
+      }
+    );
+    employees := newEmployees;
+    updated;
+  };
+
+  //////////////////////////////////////////////////////////////////////////
+  // Old System Functions
+  //////////////////////////////////////////////////////////////////////////
 
   // Register new Employee
   public shared ({ caller }) func registerEmployee(
@@ -87,7 +224,6 @@ import Migration "migration";
     photoData : Text,
   ) : async Bool {
     let existingEmployeeIter = employees.values().find(func(e) { e.employeeId == employeeId });
-
     switch (existingEmployeeIter) {
       case (?_employee) { false };
       case (null) {
@@ -99,6 +235,7 @@ import Migration "migration";
           photoData;
           registeredAt = Time.now().toText();
           approvalStatus = "pending";
+          monthlyPayment = 0;
         };
         employees.add(newEmployee);
         true;
@@ -106,7 +243,7 @@ import Migration "migration";
     };
   };
 
-  // Approve Employee
+  // Approve Employee (without changing payment)
   public shared ({ caller }) func approveEmployee(employeeId : Text) : async Bool {
     updateEmployeeStatus(employeeId, "approved");
   };
@@ -118,22 +255,17 @@ import Migration "migration";
 
   // Helper to update employee status
   func updateEmployeeStatus(employeeId : Text, status : Text) : Bool {
-    let updated = employees.map<Employee, Employee>(
+    var updated = false;
+    let newEmployees = employees.map<Employee, Employee>(
       func(emp) {
         if (emp.employeeId == employeeId) {
+          updated := true;
           { emp with approvalStatus = status };
-        } else {
-          emp;
-        };
+        } else { emp };
       }
     );
-    employees := updated;
-
-    let found = employees.values().find(func(emp) { emp.employeeId == employeeId });
-    switch (found) {
-      case (?_) { true };
-      case (null) { false };
-    };
+    employees := newEmployees;
+    updated;
   };
 
   // Mark Attendance
@@ -144,18 +276,17 @@ import Migration "migration";
     checkInTime : Text,
     photoData : Text,
   ) : async Bool {
-    switch (employees.values().find(func(e) { e.employeeId == employeeId })) {
+    let employeeOptIter = employees.values().find(func(e) { e.employeeId == employeeId });
+    switch (employeeOptIter) {
       case (null) { false };
       case (?employee) {
         if (employee.approvalStatus != "approved") {
           return false;
         };
-
-        let alreadyMarked = attendanceRecords.values().find(
+        let alreadyMarkedIter = attendanceRecords.values().find(
           func(r) { r.employeeId == employeeId and r.date == date }
         );
-
-        switch (alreadyMarked) {
+        switch (alreadyMarkedIter) {
           case (?_) { false };
           case (null) {
             let newRecord : AttendanceRecord = {
@@ -167,7 +298,6 @@ import Migration "migration";
               status = "Present";
               photoData;
             };
-
             attendanceRecords.add(newRecord);
             true;
           };
@@ -182,12 +312,12 @@ import Migration "migration";
     filtered.toArray();
   };
 
-  // Get All Attendance sorted by date
+  // Get All Attendance
   public query ({ caller }) func getAllAttendance() : async [AttendanceRecord] {
     attendanceRecords.toArray();
   };
 
-  // Get All Employees sorted by name
+  // Get All Employees
   public query ({ caller }) func getAllEmployees() : async [Employee] {
     employees.toArray();
   };
@@ -207,25 +337,12 @@ import Migration "migration";
     );
   };
 
-  // Delete Employee and their records
-  public shared ({ caller }) func deleteEmployee(employeeId : Text) : async Bool {
-    let hasEmployee = employees.values().any(
-      func(e) { e.employeeId == employeeId }
-    );
-    if (not hasEmployee) { return false };
-
-    employees := employees.filter(func(e) { e.employeeId != employeeId });
-    attendanceRecords := attendanceRecords.filter(func(record) { record.employeeId != employeeId });
-    true;
-  };
-
   // Get statistics for date/month
   public query ({ caller }) func getStats(date : Text, month : Text) : async Stats {
     let totalEmployees = employees.size();
     let pendingEmployees = employees.filter(func(e) { e.approvalStatus == "pending" }).size();
     let todayCheckIns = attendanceRecords.filter(func(record) { record.date == date }).size();
     let monthCheckIns = attendanceRecords.filter(func(record) { record.date.startsWith(#text month) }).size();
-
     {
       totalEmployees;
       pendingEmployees;
@@ -245,8 +362,7 @@ import Migration "migration";
   func getFirstNAttendanceRecords(list : List.List<AttendanceRecord>, n : Nat) : [AttendanceRecord] {
     let iterator = list.values();
     var count = 0;
-
-    let filteredList = List.empty<AttendanceRecord>(); // Mutable return array
+    let filteredList = List.empty<AttendanceRecord>();
     while (count < n) {
       switch (iterator.next()) {
         case (?val) {
@@ -260,8 +376,6 @@ import Migration "migration";
   };
 
   // Holiday management functions
-
-  // Add new holiday (returns false if date already exists)
   public shared ({ caller }) func addHoliday(date : Text, reason : Text) : async Bool {
     let exists = holidays.values().find(func(h) { h.date == date });
     switch (exists) {
@@ -274,7 +388,6 @@ import Migration "migration";
     };
   };
 
-  // Remove holiday (returns false if not found)
   public shared ({ caller }) func removeHoliday(date : Text) : async Bool {
     let found = holidays.values().find(func(h) { h.date == date });
     switch (found) {
@@ -286,18 +399,15 @@ import Migration "migration";
     };
   };
 
-  // Get all holidays (sorted by date ascending)
   public query ({ caller }) func getHolidays() : async [Holiday] {
     holidays.toArray();
   };
 
-  // Get holidays for a specific month (YYYY-MM format)
   public query ({ caller }) func getHolidaysByMonth(month : Text) : async [Holiday] {
     let filtered = holidays.filter(func(h) { h.date.startsWith(#text month) });
     filtered.toArray();
   };
 
-  // Calculate working days for a month (excluding holidays)
   func calculateWorkingDaysInMonth(month : Text) : Nat {
     let components = getMonthComponents(month);
     switch (components) {
@@ -312,25 +422,18 @@ import Migration "migration";
           case (_) { 0 };
         };
 
-        // Subtract holidays only for that month
-        let holidaysForMonth = holidays.filter(
-          func(h) { h.date.startsWith(#text month) }
-        );
+        let holidaysForMonth = holidays.filter(func(h) { h.date.startsWith(#text month) });
         days -= holidaysForMonth.size();
         days;
       };
     };
   };
 
-  // Helper to parse YYYY-MM string into (year, month) tuple
   func getMonthComponents(monthStr : Text) : ?(Nat, Nat) {
     let parts = monthStr.split(#char '-').toArray();
-
     if (parts.size() != 2) { return null };
-
     let yearOpt = Nat.fromText(parts[0]);
     let monthOpt = Nat.fromText(parts[1]);
-
     switch (yearOpt, monthOpt) {
       case (?year, ?month) {
         if (month >= 1 and month <= 12) {
@@ -341,25 +444,30 @@ import Migration "migration";
     };
   };
 
-  // Get Month End Report for each employee
+  // Helper function for string representing Nat as integer with default fallback
+  func stringToNat(str : Text, defaultVal : Nat) : Nat {
+    switch (Nat.fromText(str)) {
+      case (?val) { val };
+      case (null) { defaultVal };
+    };
+  };
+
+  // Get Month End Report for Month
   public query ({ caller }) func getMonthEndReport(month : Text) : async [MonthEndReport] {
-    let monthRecords = attendanceRecords.filter(
-      func(record) { record.date.startsWith(#text month) }
-    );
-
+    let monthRecords = attendanceRecords.filter(func(record) { record.date.startsWith(#text month) });
     let reports = List.empty<MonthEndReport>();
-
     for (employee in employees.values()) {
-      let employeeRecords = monthRecords.filter(
-        func(record) { record.employeeId == employee.employeeId }
-      );
+      let employeeRecords = monthRecords.filter(func(record) { record.employeeId == employee.employeeId });
       let presentDays = employeeRecords.size();
-
       let totalWorkingDays = calculateWorkingDaysInMonth(month);
       let absentDays = if (totalWorkingDays >= presentDays) {
         totalWorkingDays - presentDays;
       } else { 0 };
-
+      let presentDates = employeeRecords.map(func(record) { record.date });
+      let salary = getMonthlySalaryOrFallback(employee.employeeId, month);
+      let earnedAmount = if (totalWorkingDays > 0) {
+        (salary * presentDays) / totalWorkingDays;
+      } else { 0 };
       let report : MonthEndReport = {
         employeeId = employee.employeeId;
         employeeName = employee.name;
@@ -367,11 +475,12 @@ import Migration "migration";
         presentDays;
         absentDays;
         totalWorkingDays;
+        monthlyPayment = salary;
+        presentDates = presentDates.toArray();
+        earnedAmount;
       };
-
       reports.add(report);
     };
-
     reports.toArray();
   };
 
