@@ -107,10 +107,13 @@ export default function CameraSection({
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // Scale down to max 320×240 to stay within ICP message size limits
+    // Scale down very aggressively to stay within ICP message size limits
+    // Target: 80×60 at 30% JPEG quality → ~2-3 KB base64, well within limits
+    const TARGET_W = 80;
+    const TARGET_H = 60;
     const srcW = video.videoWidth || 640;
     const srcH = video.videoHeight || 480;
-    const scale = Math.min(320 / srcW, 240 / srcH, 1);
+    const scale = Math.min(TARGET_W / srcW, TARGET_H / srcH, 1);
     canvas.width = Math.round(srcW * scale);
     canvas.height = Math.round(srcH * scale);
 
@@ -120,7 +123,18 @@ export default function CameraSection({
     ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
     ctx.restore();
 
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+    let dataUrl = canvas.toDataURL("image/jpeg", 0.3);
+
+    // Safety valve: if still too large, compress further to 60×45 at 20% quality
+    if (dataUrl.length > 10000) {
+      const tinyCanvas = document.createElement("canvas");
+      tinyCanvas.width = 60;
+      tinyCanvas.height = 45;
+      const tinyCtx = tinyCanvas.getContext("2d")!;
+      tinyCtx.drawImage(canvas, 0, 0, 60, 45);
+      dataUrl = tinyCanvas.toDataURL("image/jpeg", 0.2);
+    }
+
     stopStream();
     setCameraState("captured");
     onCapture(dataUrl);

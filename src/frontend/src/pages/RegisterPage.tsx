@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, UserPlus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import CameraSection from "../components/CameraSection";
 import { useActor } from "../hooks/useActor";
@@ -36,6 +36,19 @@ export default function RegisterPage() {
 
   const { actor, isFetching: isActorLoading } = useActor();
   const { mutateAsync: registerEmployee, isPending } = useRegisterEmployee();
+
+  // Debug: log when actor becomes available so we know the connection state
+  useEffect(() => {
+    if (actor) {
+      console.log(
+        "[RegisterPage] Actor is ready — backend connection established.",
+      );
+    } else if (!isActorLoading) {
+      console.warn(
+        "[RegisterPage] Actor is null and not loading — backend may be unavailable.",
+      );
+    }
+  }, [actor, isActorLoading]);
 
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
@@ -66,13 +79,32 @@ export default function RegisterPage() {
     }
 
     try {
-      const success = await registerEmployee({
-        name: name.trim(),
-        employeeId: employeeId.trim(),
-        department,
-        role: role.trim(),
-        photoData: photoData ?? "",
-      });
+      const attemptRegister = async (retryCount = 0): Promise<boolean> => {
+        try {
+          return await registerEmployee({
+            name: name.trim(),
+            employeeId: employeeId.trim(),
+            department,
+            role: role.trim(),
+            photoData: photoData ?? "",
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const isIcErr =
+            msg.includes("IC0") ||
+            msg.includes("canister") ||
+            msg.includes("reject");
+          if (isIcErr && retryCount === 0) {
+            toast.info("Retrying connection...", {
+              description: "First attempt failed, trying once more.",
+            });
+            await new Promise((r) => setTimeout(r, 2000));
+            return attemptRegister(1);
+          }
+          throw err;
+        }
+      };
+      const success = await attemptRegister();
 
       if (success) {
         setShowSuccess(true);
@@ -88,14 +120,35 @@ export default function RegisterPage() {
         setErrors({});
         setTimeout(() => setShowSuccess(false), 8000);
       } else {
-        toast.error("Registration failed", {
-          description: "An employee with this ID may already exist.",
+        // success === false means the backend rejected the request (e.g. duplicate ID)
+        console.warn(
+          "[RegisterPage] Registration returned false — possible duplicate employee ID:",
+          employeeId,
+        );
+        toast.error("Registration failed — ID already exists", {
+          description: `An employee with ID "${employeeId}" may already be registered. Please use a different Employee ID.`,
         });
       }
     } catch (error) {
-      toast.error("Something went wrong", {
-        description:
-          error instanceof Error ? error.message : "Please try again.",
+      console.error("[RegisterPage] Registration error:", error);
+      // IC errors (IC0508 canister stopped, IC0503 overloaded, etc.) contain
+      // raw JSON that is confusing for users — show a friendly message instead.
+      const rawMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+            ? error
+            : "";
+      const isIcError =
+        rawMessage.includes("IC0") ||
+        rawMessage.includes("canister") ||
+        rawMessage.includes("reject") ||
+        rawMessage.includes("non_replicated");
+      const friendlyMessage = isIcError
+        ? "The server is temporarily unavailable. Please wait a few seconds and try again."
+        : rawMessage || "An unexpected error occurred. Please try again.";
+      toast.error("Registration failed", {
+        description: friendlyMessage,
       });
     }
   };

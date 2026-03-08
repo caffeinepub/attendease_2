@@ -1936,7 +1936,7 @@ function MarkAttendanceTab() {
         employeeId: employee.employeeId,
         date: today,
         checkInTime: getCurrentTime(),
-        photoData: "",
+        photoData: employee.photoData ?? "",
       });
       if (result) {
         toast.success(`Attendance marked for ${employee.name}`, {
