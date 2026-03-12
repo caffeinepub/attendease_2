@@ -1,4 +1,3 @@
-import { Calendar, CheckCircle, Shield, UserPlus } from "lucide-react";
 import type { PageId } from "../App";
 
 interface TopNavProps {
@@ -6,71 +5,45 @@ interface TopNavProps {
   onNavigate: (page: PageId) => void;
 }
 
-const navItems: {
-  id: PageId;
-  label: string;
-  icon: React.ReactNode;
-  ocid: string;
-}[] = [
-  {
-    id: "register",
-    label: "Register",
-    icon: <UserPlus size={16} />,
-    ocid: "nav.register.link",
-  },
-  {
-    id: "my-attendance",
-    label: "My Attendance",
-    icon: <Calendar size={16} />,
-    ocid: "nav.myattendance.link",
-  },
-  {
-    id: "manager",
-    label: "Manager Portal",
-    icon: <Shield size={16} />,
-    ocid: "nav.manager.link",
-  },
-];
-
 export default function TopNav({ activePage, onNavigate }: TopNavProps) {
   return (
-    <header
-      className="top-nav"
-      style={{ background: "oklch(var(--navy))" }}
-      aria-label="Main navigation"
-    >
-      {/* Brand */}
-      <div className="top-nav-brand">
-        <div
-          className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0"
-          style={{ background: "oklch(var(--gold))" }}
-        >
-          <CheckCircle size={18} style={{ color: "oklch(0.12 0.04 255)" }} />
+    <header className="sticky top-0 z-50 bg-white border-b border-border shadow-xs">
+      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center">
+            <span className="text-white text-xs font-bold">A</span>
+          </div>
+          <span className="font-semibold text-foreground tracking-tight">
+            AttendEase
+          </span>
         </div>
-        <span className="font-display font-bold text-white text-lg tracking-tight hidden sm:block">
-          AttendEase
-        </span>
+        <nav className="flex items-center gap-1" aria-label="Main navigation">
+          <button
+            type="button"
+            data-ocid="nav.attendance_view.link"
+            onClick={() => onNavigate("attendance-view")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activePage === "attendance-view"
+                ? "bg-primary text-white"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Attendance View
+          </button>
+          <button
+            type="button"
+            data-ocid="nav.manager_portal.link"
+            onClick={() => onNavigate("manager")}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              activePage === "manager"
+                ? "bg-primary text-white"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+            }`}
+          >
+            Manager Portal
+          </button>
+        </nav>
       </div>
-
-      {/* Nav Buttons */}
-      <nav className="top-nav-buttons" aria-label="Portal navigation">
-        {navItems.map((item) => {
-          const isActive = activePage === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onNavigate(item.id)}
-              className={`top-nav-btn ${isActive ? "top-nav-btn--active" : ""}`}
-              data-ocid={item.ocid}
-              aria-current={isActive ? "page" : undefined}
-            >
-              <span className="flex-shrink-0">{item.icon}</span>
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
     </header>
   );
 }

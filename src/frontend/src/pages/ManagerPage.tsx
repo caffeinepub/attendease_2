@@ -65,6 +65,7 @@ import {
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { AttendanceRecord } from "../backend.d";
+import FaceDetectionCamera from "../components/FaceDetectionCamera";
 import {
   countWorkingDaysExcludingSundays,
   getCurrentMonth,
@@ -1908,6 +1909,11 @@ function MarkAttendanceTab() {
   const { mutateAsync: markAttendance, isPending: isMarking } =
     useMarkAttendance();
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [markingEmployee, setMarkingEmployee] = useState<{
+    name: string;
+    employeeId: string;
+    photoData?: string;
+  } | null>(null);
 
   const approvedEmployees = useMemo(
     () => (employees ?? []).filter((e) => e.approvalStatus === "approved"),
@@ -1930,6 +1936,11 @@ function MarkAttendanceTab() {
 
   const handleMarkPresent = async (employee: (typeof approvedEmployees)[0]) => {
     setMarkingId(employee.employeeId);
+    setMarkingEmployee({
+      name: employee.name,
+      employeeId: employee.employeeId,
+      photoData: employee.photoData ?? "",
+    });
     try {
       const result = await markAttendance({
         name: employee.name,
@@ -1969,6 +1980,11 @@ function MarkAttendanceTab() {
 
   return (
     <div className="space-y-5">
+      {/* Face Detection Camera */}
+      <FaceDetectionCamera
+        markingEmployee={markingEmployee}
+        onMarkingComplete={() => setMarkingEmployee(null)}
+      />
       {/* Header */}
       <div
         className="form-section"

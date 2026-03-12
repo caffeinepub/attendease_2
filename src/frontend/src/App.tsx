@@ -1,51 +1,38 @@
 import { Toaster } from "@/components/ui/sonner";
 import { useState } from "react";
 import TopNav from "./components/TopNav";
-import ManagerPage from "./pages/ManagerPage";
-import MyAttendancePage from "./pages/MyAttendancePage";
-import RegisterPage from "./pages/RegisterPage";
+import AttendanceViewPage from "./pages/AttendanceViewPage";
+import ManagerPortalPage from "./pages/ManagerPortalPage";
 
-export type PageId = "register" | "my-attendance" | "manager";
+export type PageId = "attendance-view" | "manager";
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageId>("register");
-
-  const renderPage = () => {
-    switch (activePage) {
-      case "register":
-        return <RegisterPage />;
-      case "my-attendance":
-        return <MyAttendancePage />;
-      case "manager":
-        return <ManagerPage />;
-      default:
-        return <RegisterPage />;
-    }
-  };
+  const [activePage, setActivePage] = useState<PageId>("attendance-view");
 
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: "oklch(0.96 0.008 240)" }}
-    >
-      {/* Top Navigation */}
+    <div className="min-h-screen flex flex-col bg-background">
       <TopNav activePage={activePage} onNavigate={setActivePage} />
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1">
         <div key={activePage} className="page-enter">
-          {renderPage()}
+          {activePage === "attendance-view" ? (
+            <AttendanceViewPage />
+          ) : (
+            <ManagerPortalPage />
+          )}
         </div>
       </main>
-
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: {
-            fontFamily: "Outfit, sans-serif",
-          },
-        }}
-      />
+      <footer className="py-4 text-center text-xs text-muted-foreground border-t border-border">
+        © {new Date().getFullYear()}.{" "}
+        <a
+          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:text-primary transition-colors"
+        >
+          Built with ❤️ using caffeine.ai
+        </a>
+      </footer>
+      <Toaster position="top-right" />
     </div>
   );
 }
