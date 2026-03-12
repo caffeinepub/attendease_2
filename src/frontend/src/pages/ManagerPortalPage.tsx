@@ -49,6 +49,7 @@ import {
   useAddHoliday,
   useAllEmployees,
   useApproveEmployeeWithPayment,
+  useDeleteEmployee,
   useHolidays,
   useMarkAttendance,
   useMonthEndReport,
@@ -569,8 +570,10 @@ function EditSalaryDialog({
 function RegisteredTab() {
   const { data: employees = [], isLoading } = useAllEmployees();
   const rejectMutation = useRejectEmployee();
+  const deleteMutation = useDeleteEmployee();
   const [approveTarget, setApproveTarget] = useState<Employee | null>(null);
   const [editTarget, setEditTarget] = useState<Employee | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
 
   const handleReject = async (emp: Employee) => {
     try {
@@ -600,6 +603,48 @@ function RegisteredTab() {
         open={!!editTarget}
         onClose={() => setEditTarget(null)}
       />
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent data-ocid="delete_employee.dialog">
+          <DialogHeader>
+            <DialogTitle>Remove Employee</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to remove{" "}
+            <strong>{deleteTarget?.name}</strong> (ID:{" "}
+            {deleteTarget?.employeeId})? This action cannot be undone.
+          </p>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              data-ocid="delete_employee.cancel_button"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-ocid="delete_employee.confirm_button"
+              onClick={async () => {
+                if (!deleteTarget) return;
+                try {
+                  await deleteMutation.mutateAsync(deleteTarget.employeeId);
+                  toast.success("Employee removed.");
+                } catch {
+                  toast.error("Failed to remove employee.");
+                }
+                setDeleteTarget(null);
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-1" /> Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {employees.length === 0 ? (
         <div
@@ -686,6 +731,15 @@ function RegisteredTab() {
                         <Edit3 className="w-3 h-3 mr-1" /> Salary
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      data-ocid={`employees.delete_button.${idx + 1}`}
+                      onClick={() => setDeleteTarget(emp)}
+                      className="h-7 text-xs"
+                    >
+                      <Trash2 className="w-3 h-3 mr-1" /> Remove
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
