@@ -3,8 +3,8 @@ import * as faceapi from "face-api.js";
 let modelsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
 
-const MODEL_URL =
-  "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+// Use locally bundled models for reliability (no external network dependency)
+const MODEL_URL = "/models";
 
 export async function loadFaceModels(): Promise<void> {
   if (modelsLoaded) return;

@@ -152,6 +152,7 @@ function RegisterTab() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descriptorsRef = useRef<Float32Array[]>([]);
+  const pendingStreamRef = useRef<MediaStream | null>(null);
 
   const stopCamera = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -165,6 +166,19 @@ function RegisterTab() {
   useEffect(() => {
     return () => stopCamera();
   }, [stopCamera]);
+
+  // Set srcObject after video element is in DOM
+  useEffect(() => {
+    if (
+      scanPhase === "scanning" &&
+      pendingStreamRef.current &&
+      videoRef.current
+    ) {
+      videoRef.current.srcObject = pendingStreamRef.current;
+      videoRef.current.play().catch(() => {});
+      pendingStreamRef.current = null;
+    }
+  }, [scanPhase]);
 
   const startFaceScan = async () => {
     setScanPhase("loading");
@@ -189,10 +203,7 @@ function RegisterTab() {
         audio: false,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      pendingStreamRef.current = stream;
     } catch {
       setScanPhase("error");
       setScanError("Camera access denied. Please allow camera permission.");
@@ -384,7 +395,9 @@ function RegisterTab() {
               </div>
             )}
 
-            {(scanPhase === "scanning" || scanPhase === "done") && (
+            {(scanPhase === "scanning" ||
+              scanPhase === "loading" ||
+              scanPhase === "done") && (
               <div className="space-y-2">
                 <div
                   className="relative bg-black rounded overflow-hidden"
@@ -914,10 +927,6 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
           return;
         }
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
         setCamStatus("live");
       } catch {
         if (!cancelled) {
@@ -936,6 +945,19 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
       }
     };
   }, []);
+
+  // Set srcObject after video element is in DOM (camStatus transitions to "live")
+  useEffect(() => {
+    if (
+      camStatus === "live" &&
+      streamRef.current &&
+      videoRef.current &&
+      !videoRef.current.srcObject
+    ) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [camStatus]);
 
   // Build matcher when models ready + employees available
   useEffect(() => {
@@ -963,7 +985,7 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
         const descriptors = descriptorsData.map((d) => new Float32Array(d));
         return new faceapi.LabeledFaceDescriptors(emp.employeeId, descriptors);
       });
-      matcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+      matcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
       setNoFaceData(false);
       setMatcherReady(true);
     } catch {
