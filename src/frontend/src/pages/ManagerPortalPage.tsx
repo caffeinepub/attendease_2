@@ -27,6 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import * as faceapi from "face-api.js";
 import {
   Camera,
   CheckCircle2,
@@ -42,6 +43,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Employee, MonthEndReport } from "../backend.d";
 import { useActor } from "../hooks/useActor";
+import { loadFaceModels } from "../hooks/useFaceAPI";
 import {
   countWorkingDaysExcludingSundays,
   getCurrentMonth,
@@ -60,6 +62,7 @@ import {
 } from "../hooks/useQueries";
 
 const MANAGER_PASSWORD = "1234";
+const SCAN_TOTAL = 5;
 
 // ─── Login Screen ───────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -128,93 +131,139 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   );
 }
 
-// ─── Camera Hook ──────────────────────────────────────────────────────────────
-function useRegCamera() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-
-  const startCamera = useCallback(async () => {
-    try {
-      setCameraError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: false,
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-      setIsCameraOn(true);
-    } catch {
-      setCameraError(
-        "Camera access denied. Please allow camera permission in your browser.",
-      );
-    }
-  }, []);
-
-  const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) {
-        track.stop();
-      }
-    }
-    streamRef.current = null;
-    setIsCameraOn(false);
-  }, []);
-
-  const capturePhoto = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return null;
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-    setCapturedPhoto(dataUrl);
-    return dataUrl;
-  }, []);
-
-  const retakePhoto = useCallback(() => {
-    setCapturedPhoto(null);
-  }, []);
-
-  return {
-    videoRef,
-    canvasRef,
-    isCameraOn,
-    capturedPhoto,
-    cameraError,
-    startCamera,
-    stopCamera,
-    capturePhoto,
-    retakePhoto,
-  };
-}
-
 // ─── Register Tab ──────────────────────────────────────────────────────────────
 function RegisterTab() {
   const [name, setName] = useState("");
   const [empId, setEmpId] = useState("");
   const [department, setDepartment] = useState("");
   const [salary, setSalary] = useState("");
-  const {
-    videoRef,
-    canvasRef,
-    isCameraOn,
-    capturedPhoto,
-    cameraError,
-    startCamera,
-    capturePhoto,
-    retakePhoto,
-  } = useRegCamera();
   const registerMutation = useRegisterEmployee();
+
+  // Face scan state
+  const [scanPhase, setScanPhase] = useState<
+    "idle" | "loading" | "scanning" | "done" | "error"
+  >("idle");
+  const [scanCount, setScanCount] = useState(0);
+  const [scanError, setScanError] = useState("");
+  const [faceDescriptors, setFaceDescriptors] = useState<Float32Array[]>([]);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const descriptorsRef = useRef<Float32Array[]>([]);
+
+  const stopCamera = useCallback(() => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (streamRef.current) {
+      for (const track of streamRef.current.getTracks()) track.stop();
+      streamRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopCamera();
+  }, [stopCamera]);
+
+  const startFaceScan = async () => {
+    setScanPhase("loading");
+    setScanError("");
+    setScanCount(0);
+    setFaceDescriptors([]);
+    descriptorsRef.current = [];
+
+    try {
+      await loadFaceModels();
+    } catch {
+      setScanPhase("error");
+      setScanError(
+        "Failed to load face recognition models. Check your internet connection.",
+      );
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+    } catch {
+      setScanPhase("error");
+      setScanError("Camera access denied. Please allow camera permission.");
+      return;
+    }
+
+    setScanPhase("scanning");
+
+    // Fail-safe timeout: 15 seconds
+    timeoutRef.current = setTimeout(() => {
+      if (descriptorsRef.current.length < SCAN_TOTAL) {
+        if (intervalRef.current) clearInterval(intervalRef.current);
+        stopCamera();
+        setScanPhase("error");
+        setScanError(
+          "Face not detected after 15 seconds. Ensure good lighting and face the camera directly.",
+        );
+      }
+    }, 15000);
+
+    intervalRef.current = setInterval(async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || video.readyState < 2 || !canvas) return;
+      if (descriptorsRef.current.length >= SCAN_TOTAL) return;
+
+      try {
+        const detection = await faceapi
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (!detection) return;
+
+        // Draw bounding box
+        const dims = faceapi.matchDimensions(canvas, video, true);
+        const resized = faceapi.resizeResults(detection, dims);
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          faceapi.draw.drawDetections(canvas, [resized]);
+        }
+
+        descriptorsRef.current = [
+          ...descriptorsRef.current,
+          detection.descriptor,
+        ];
+        const newCount = descriptorsRef.current.length;
+        setScanCount(newCount);
+        setFaceDescriptors([...descriptorsRef.current]);
+
+        if (newCount >= SCAN_TOTAL) {
+          if (intervalRef.current) clearInterval(intervalRef.current);
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          stopCamera();
+          setScanPhase("done");
+        }
+      } catch {
+        // Silently continue if detection fails on a frame
+      }
+    }, 1500);
+  };
+
+  const resetScan = () => {
+    stopCamera();
+    setScanPhase("idle");
+    setScanCount(0);
+    setScanError("");
+    setFaceDescriptors([]);
+    descriptorsRef.current = [];
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -222,17 +271,20 @@ function RegisterTab() {
       toast.error("Please fill in all fields.");
       return;
     }
-    if (!capturedPhoto) {
-      toast.error("Please capture a photo first.");
+    if (faceDescriptors.length < SCAN_TOTAL) {
+      toast.error("Please complete the face scan (5/5) first.");
       return;
     }
+    const descriptorJson = JSON.stringify(
+      faceDescriptors.map((d) => Array.from(d)),
+    );
     try {
       const result = await registerMutation.mutateAsync({
         name,
         employeeId: empId,
         department,
         role: "employee",
-        photoData: "",
+        photoData: descriptorJson,
       });
       if (result) {
         toast.success(
@@ -242,7 +294,7 @@ function RegisterTab() {
         setEmpId("");
         setDepartment("");
         setSalary("");
-        retakePhoto();
+        resetScan();
       } else {
         toast.error("Employee ID already exists. Please use a different ID.");
       }
@@ -300,21 +352,43 @@ function RegisterTab() {
           />
         </div>
 
-        {/* Camera Section */}
+        {/* Face Scan Section */}
         <div className="border border-border rounded-lg overflow-hidden">
           <div className="bg-muted/40 px-3 py-2 flex items-center gap-2">
             <Camera className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Face Photo</span>
+            <span className="text-sm font-medium">Face Recognition Scan</span>
           </div>
           <div className="p-3 space-y-3">
-            {cameraError && (
-              <p className="text-destructive text-xs">{cameraError}</p>
+            {scanPhase === "idle" && (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground mb-3">
+                  Scan employee's face 5 times for accurate recognition
+                </p>
+                <Button
+                  type="button"
+                  data-ocid="register.face_scan.primary_button"
+                  onClick={startFaceScan}
+                >
+                  <Camera className="w-4 h-4 mr-2" />
+                  Start Face Scan
+                </Button>
+              </div>
             )}
-            {!capturedPhoto ? (
-              <>
+
+            {scanPhase === "loading" && (
+              <div className="text-center py-4 flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  Loading face recognition models...
+                </span>
+              </div>
+            )}
+
+            {(scanPhase === "scanning" || scanPhase === "done") && (
+              <div className="space-y-2">
                 <div
                   className="relative bg-black rounded overflow-hidden"
-                  style={{ height: 200 }}
+                  style={{ height: 220 }}
                 >
                   <video
                     ref={videoRef}
@@ -322,54 +396,83 @@ function RegisterTab() {
                     playsInline
                     muted
                     className="w-full h-full object-cover"
+                    style={{
+                      display: scanPhase === "scanning" ? "block" : "none",
+                    }}
                   />
-                  {!isCameraOn && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-muted/80">
-                      <Camera className="w-8 h-8 text-muted-foreground" />
+                  <canvas
+                    ref={canvasRef}
+                    className="absolute inset-0 w-full h-full"
+                    style={{
+                      display: scanPhase === "scanning" ? "block" : "none",
+                    }}
+                  />
+                  {scanPhase === "done" && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black">
+                      <CheckCircle2 className="w-10 h-10 text-green-400 mb-2" />
+                      <p className="text-green-400 font-bold text-sm">
+                        Face captured successfully!
+                      </p>
+                    </div>
+                  )}
+                  {scanPhase === "scanning" && (
+                    <div className="absolute top-2 left-2 bg-black/60 rounded px-2 py-1">
+                      <span className="text-green-400 text-xs font-mono">
+                        Scanning... {scanCount}/{SCAN_TOTAL}
+                      </span>
                     </div>
                   )}
                 </div>
-                <canvas ref={canvasRef} className="hidden" />
-                <div className="flex gap-2">
-                  {!isCameraOn ? (
-                    <Button
-                      type="button"
-                      data-ocid="register.camera.primary_button"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={startCamera}
-                    >
-                      <Camera className="w-4 h-4 mr-2" /> Enable Camera
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      data-ocid="register.capture.primary_button"
-                      className="flex-1"
-                      onClick={capturePhoto}
-                    >
-                      Capture Photo
-                    </Button>
-                  )}
+
+                {/* Progress bar */}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full bg-green-500 transition-all duration-300"
+                      style={{ width: `${(scanCount / SCAN_TOTAL) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-muted-foreground w-10 text-right">
+                    {scanCount}/{SCAN_TOTAL}
+                  </span>
                 </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <img
-                  src={capturedPhoto}
-                  alt="Captured"
-                  className="w-full rounded object-cover"
-                  style={{ maxHeight: 200 }}
-                />
+
+                {scanPhase === "done" && (
+                  <p className="text-green-600 text-xs font-medium text-center">
+                    ✓ Face captured successfully ({SCAN_TOTAL}/{SCAN_TOTAL})
+                  </p>
+                )}
+
                 <Button
                   type="button"
-                  data-ocid="register.retake.secondary_button"
                   variant="outline"
                   size="sm"
-                  onClick={retakePhoto}
-                  className="w-full"
+                  data-ocid="register.rescan.secondary_button"
+                  onClick={resetScan}
+                  className="w-full text-xs"
                 >
-                  Retake Photo
+                  Re-scan Face
+                </Button>
+              </div>
+            )}
+
+            {scanPhase === "error" && (
+              <div className="space-y-2">
+                <p
+                  data-ocid="register.face_scan.error_state"
+                  className="text-destructive text-xs"
+                >
+                  {scanError}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-ocid="register.retry_scan.secondary_button"
+                  onClick={resetScan}
+                  className="w-full text-xs"
+                >
+                  Try Again
                 </Button>
               </div>
             )}
@@ -377,18 +480,19 @@ function RegisterTab() {
         </div>
 
         <Button
+          data-ocid="register.submit.primary_button"
           type="submit"
-          data-ocid="register.submit_button"
           className="w-full"
-          disabled={registerMutation.isPending}
+          disabled={
+            registerMutation.isPending || faceDescriptors.length < SCAN_TOTAL
+          }
         >
           {registerMutation.isPending ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Registering...
-            </>
-          ) : (
-            "Register Employee"
-          )}
+            <Loader2 className="w-4 h-4 animate-spin mr-2" />
+          ) : null}
+          {faceDescriptors.length < SCAN_TOTAL
+            ? `Please complete face scan (${faceDescriptors.length}/${SCAN_TOTAL})`
+            : "Register Employee"}
         </Button>
       </form>
     </div>
@@ -754,103 +858,254 @@ function RegisteredTab() {
 // ─── Face Detection Camera (Mark Attendance) ──────────────────────────────────
 function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [confidence, setConfidence] = useState(0.92);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMarkingRef = useRef(false);
+
+  const [camStatus, setCamStatus] = useState<"loading" | "live" | "error">(
+    "loading",
+  );
+  const [modelsReady, setModelsReady] = useState(false);
+  const [matcherReady, setMatcherReady] = useState(false);
+  const [statusMsg, setStatusMsg] = useState(
+    "Position face in front of camera",
+  );
+  const [statusColor, setStatusColor] = useState<
+    "gray" | "yellow" | "green" | "red"
+  >("gray");
   const [verifiedEmp, setVerifiedEmp] = useState<Employee | null>(null);
   const [verifiedTime, setVerifiedTime] = useState("");
+  const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
+  const [noFaceData, setNoFaceData] = useState(false);
+
   const markMutation = useMarkAttendance();
   const { actor } = useActor();
-  const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
 
-  // Start camera when component mounts
+  // Build FaceMatcher from employee descriptors
+  const matcherRef = useRef<faceapi.FaceMatcher | null>(null);
+
+  // Load models & camera
   useEffect(() => {
-    const start = async () => {
+    let cancelled = false;
+
+    const init = async () => {
+      // Load models
+      try {
+        await loadFaceModels();
+        if (cancelled) return;
+        setModelsReady(true);
+      } catch {
+        if (!cancelled) {
+          setCamStatus("error");
+          setStatusMsg("Failed to load face recognition models.");
+        }
+        return;
+      }
+
+      // Start camera
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: { width: 640, height: 480 },
           audio: false,
         });
+        if (cancelled) {
+          for (const t of stream.getTracks()) t.stop();
+          return;
+        }
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.play();
+          await videoRef.current.play();
         }
-        setIsCameraOn(true);
+        setCamStatus("live");
       } catch {
-        setIsCameraOn(false);
+        if (!cancelled) {
+          setCamStatus("error");
+          setStatusMsg("Camera access denied. Please allow camera permission.");
+        }
       }
     };
-    start();
+
+    init();
     return () => {
+      cancelled = true;
+      if (intervalRef.current) clearInterval(intervalRef.current);
       if (streamRef.current) {
-        for (const track of streamRef.current.getTracks()) {
-          track.stop();
-        }
+        for (const t of streamRef.current.getTracks()) t.stop();
       }
     };
   }, []);
 
-  // Check which employees are already marked today
+  // Build matcher when models ready + employees available
+  useEffect(() => {
+    if (!modelsReady) return;
+
+    const validEmployees = employees.filter((e) => {
+      if (!e.photoData || e.photoData.length < 10) return false;
+      try {
+        const parsed = JSON.parse(e.photoData);
+        return Array.isArray(parsed) && parsed.length > 0;
+      } catch {
+        return false;
+      }
+    });
+
+    if (validEmployees.length === 0) {
+      setNoFaceData(true);
+      setMatcherReady(true);
+      return;
+    }
+
+    try {
+      const labeledDescriptors = validEmployees.map((emp) => {
+        const descriptorsData = JSON.parse(emp.photoData) as number[][];
+        const descriptors = descriptorsData.map((d) => new Float32Array(d));
+        return new faceapi.LabeledFaceDescriptors(emp.employeeId, descriptors);
+      });
+      matcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+      setNoFaceData(false);
+      setMatcherReady(true);
+    } catch {
+      setNoFaceData(true);
+      setMatcherReady(true);
+    }
+  }, [modelsReady, employees]);
+
+  // Load already-marked IDs for today
   useEffect(() => {
     if (!actor || employees.length === 0) return;
     const today = getTodayDate();
-    const checkAll = async () => {
-      const results = await Promise.all(
-        employees.map(async (emp) => {
-          const marked = await actor.checkIfAttendanceMarkedToday(
-            emp.employeeId,
-            today,
-          );
-          return { id: emp.employeeId, marked };
-        }),
-      );
+    Promise.all(
+      employees.map(async (emp) => {
+        const marked = await actor.checkIfAttendanceMarkedToday(
+          emp.employeeId,
+          today,
+        );
+        return { id: emp.employeeId, marked };
+      }),
+    ).then((results) => {
       const ids = new Set(results.filter((r) => r.marked).map((r) => r.id));
       setMarkedIds(ids);
-    };
-    checkAll();
+    });
   }, [actor, employees]);
 
-  // Confidence update interval
+  // Detection loop
   useEffect(() => {
-    const interval = setInterval(() => {
-      setConfidence(0.85 + Math.random() * 0.14);
-    }, 800);
-    return () => clearInterval(interval);
-  }, []);
+    if (camStatus !== "live" || !matcherReady || noFaceData) return;
+    if (!matcherRef.current) return;
 
-  const handleMarkPresent = async (emp: Employee) => {
-    const today = getTodayDate();
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-    try {
-      const result = await markMutation.mutateAsync({
-        name: emp.name,
-        employeeId: emp.employeeId,
-        date: today,
-        checkInTime: timeStr,
-        photoData: "",
-      });
-      if (result) {
-        setVerifiedEmp(emp);
-        setVerifiedTime(timeStr);
-        setMarkedIds((prev) => new Set(prev).add(emp.employeeId));
-        setTimeout(() => setVerifiedEmp(null), 4000);
-        toast.success(`${emp.name} marked present at ${timeStr}`);
-      } else {
-        toast.error("Already marked or failed.");
+    intervalRef.current = setInterval(async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || video.readyState < 2 || !canvas || isMarkingRef.current)
+        return;
+
+      try {
+        const detection = await faceapi
+          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (!detection) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+          setStatusMsg("Position face in front of camera");
+          setStatusColor("gray");
+          return;
+        }
+
+        // Draw bounding box
+        const dims = faceapi.matchDimensions(canvas, video, true);
+        const resized = faceapi.resizeResults(detection, dims);
+        const ctx = canvas.getContext("2d");
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        faceapi.draw.drawDetections(canvas, [resized]);
+
+        setStatusMsg("Face detected, identifying...");
+        setStatusColor("yellow");
+
+        if (!matcherRef.current) return;
+        const match = matcherRef.current.findBestMatch(detection.descriptor);
+
+        if (match.label === "unknown") {
+          setStatusMsg("Face Not Recognized");
+          setStatusColor("red");
+          return;
+        }
+
+        // Found a match
+        const emp = employees.find((e) => e.employeeId === match.label);
+        if (!emp) return;
+
+        if (markedIds.has(emp.employeeId)) {
+          setStatusMsg(`✓ ${emp.name} — Already marked today`);
+          setStatusColor("green");
+          return;
+        }
+
+        // Mark attendance
+        isMarkingRef.current = true;
+        const today = getTodayDate();
+        const now = new Date();
+        const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+        try {
+          const result = await markMutation.mutateAsync({
+            name: emp.name,
+            employeeId: emp.employeeId,
+            date: today,
+            checkInTime: timeStr,
+            photoData: "",
+          });
+
+          if (result) {
+            setVerifiedEmp(emp);
+            setVerifiedTime(timeStr);
+            setMarkedIds((prev) => new Set(prev).add(emp.employeeId));
+            setStatusMsg(`✓ IDENTITY VERIFIED — ${emp.name} • ${timeStr}`);
+            setStatusColor("green");
+            toast.success(`${emp.name} marked present at ${timeStr}`);
+
+            // Clear canvas and resume after 4 seconds
+            setTimeout(() => {
+              isMarkingRef.current = false;
+              setVerifiedEmp(null);
+              setStatusMsg("Position face in front of camera");
+              setStatusColor("gray");
+            }, 4000);
+          } else {
+            isMarkingRef.current = false;
+          }
+        } catch {
+          isMarkingRef.current = false;
+          toast.error("Failed to mark attendance.");
+        }
+      } catch {
+        // Silently continue on detection error
       }
-    } catch {
-      toast.error("Failed to mark attendance.");
-    }
-  };
+    }, 600);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [camStatus, matcherReady, noFaceData, employees, markedIds, markMutation]);
+
+  const statusBg =
+    statusColor === "green"
+      ? "bg-green-500/90 text-white"
+      : statusColor === "yellow"
+        ? "bg-yellow-500/90 text-black"
+        : statusColor === "red"
+          ? "bg-red-500/90 text-white"
+          : "bg-black/60 text-white/70";
 
   return (
     <div className="space-y-4">
-      {/* Camera with face detection overlay */}
+      {/* Camera */}
       <div
         className="relative bg-black rounded-xl overflow-hidden"
-        style={{ height: 280 }}
+        style={{ height: 300 }}
       >
         <video
           ref={videoRef}
@@ -858,66 +1113,78 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
           playsInline
           muted
           className="w-full h-full object-cover"
+          style={{ display: camStatus === "live" ? "block" : "none" }}
+        />
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ display: camStatus === "live" ? "block" : "none" }}
         />
 
-        {isCameraOn && (
-          <>
-            {/* LIVE indicator */}
-            <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 rounded-full px-2 py-1">
-              <div className="blink-dot" />
-              <span className="text-white text-xs font-bold tracking-widest">
-                LIVE
-              </span>
-            </div>
-
-            {/* Confidence score */}
-            <div className="absolute top-3 right-3 bg-black/60 rounded-md px-2 py-1">
-              <span className="text-green-400 text-xs font-mono">
-                Real {confidence.toFixed(4)}
-              </span>
-            </div>
-
-            {/* Face bounding box */}
-            <div
-              className="absolute"
-              style={{
-                left: "30%",
-                top: "15%",
-                width: "40%",
-                height: "65%",
-              }}
-            >
-              <div className="corner-tl" />
-              <div className="corner-tr" />
-              <div className="corner-bl" />
-              <div className="corner-br" />
-              <div className="scan-line" />
-            </div>
-
-            {/* Identity verified banner */}
-            {verifiedEmp && (
-              <div className="verified-banner absolute bottom-0 left-0 right-0 bg-green-600/90 text-white p-3 flex items-center gap-3">
-                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-bold text-sm">IDENTITY VERIFIED</p>
-                  <p className="text-xs opacity-90 truncate">
-                    {verifiedEmp.name} — {verifiedTime}
-                  </p>
-                </div>
-              </div>
-            )}
-          </>
+        {/* Loading state */}
+        {camStatus === "loading" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <Loader2 className="w-8 h-8 text-white/60 animate-spin" />
+            <p className="text-white/60 text-sm">
+              Loading face recognition models...
+            </p>
+          </div>
         )}
 
-        {!isCameraOn && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <Camera className="w-8 h-8 text-white/40 mx-auto mb-2" />
-              <p className="text-white/60 text-sm">Camera unavailable</p>
+        {/* Error state */}
+        {camStatus === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6">
+            <Camera className="w-8 h-8 text-white/30" />
+            <p className="text-white/60 text-sm text-center">{statusMsg}</p>
+          </div>
+        )}
+
+        {/* LIVE badge */}
+        {camStatus === "live" && (
+          <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 rounded-full px-2 py-1">
+            <span
+              className="w-2 h-2 rounded-full bg-red-500"
+              style={{ animation: "blink-dot 1.2s ease-in-out infinite" }}
+            />
+            <span className="text-white text-xs font-bold tracking-widest">
+              LIVE
+            </span>
+          </div>
+        )}
+
+        {/* Verified banner */}
+        {verifiedEmp && camStatus === "live" && (
+          <div className="absolute bottom-0 left-0 right-0 bg-green-600/90 text-white p-3 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="font-bold text-sm">IDENTITY VERIFIED</p>
+              <p className="text-xs opacity-90">
+                {verifiedEmp.name} — {verifiedTime}
+              </p>
             </div>
           </div>
         )}
       </div>
+
+      {/* Status bar */}
+      {camStatus === "live" && (
+        <div
+          className={`rounded-lg px-4 py-2 text-sm font-medium text-center ${statusBg}`}
+        >
+          {statusMsg}
+        </div>
+      )}
+
+      {/* No face data warning */}
+      {noFaceData && (
+        <div
+          data-ocid="attendance.no_face_data.error_state"
+          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          No face data found for employees. Please register employees with face
+          scan first.
+        </div>
+      )}
 
       {/* Employee list */}
       {employees.length === 0 ? (
@@ -934,7 +1201,7 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
               <TableHead>Name</TableHead>
               <TableHead>ID</TableHead>
               <TableHead>Department</TableHead>
-              <TableHead className="text-right">Action</TableHead>
+              <TableHead className="text-right">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -951,15 +1218,9 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
                       <CheckCircle2 className="w-3 h-3 mr-1" /> Present Today
                     </Badge>
                   ) : (
-                    <Button
-                      size="sm"
-                      data-ocid={`mark.present.primary_button.${idx + 1}`}
-                      onClick={() => handleMarkPresent(emp)}
-                      disabled={markMutation.isPending}
-                      className="h-7 text-xs"
-                    >
-                      Mark Present
-                    </Button>
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Absent
+                    </Badge>
                   )}
                 </TableCell>
               </TableRow>
@@ -967,6 +1228,13 @@ function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
           </TableBody>
         </Table>
       )}
+
+      <style>{`
+        @keyframes blink-dot {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.2; }
+        }
+      `}</style>
     </div>
   );
 }
