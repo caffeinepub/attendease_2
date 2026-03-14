@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=DM+Serif+Display:ital@0;1&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -6,43 +6,40 @@
 
 @layer base {
   :root {
-    --background: 0.97 0.005 240;
-    --foreground: 0.18 0.02 250;
+    --background: 1 0 0;
+    --foreground: 0.13 0.01 260;
     --card: 1 0 0;
-    --card-foreground: 0.18 0.02 250;
+    --card-foreground: 0.13 0.01 260;
     --popover: 1 0 0;
-    --popover-foreground: 0.18 0.02 250;
-    --primary: 0.42 0.155 252;
+    --popover-foreground: 0.13 0.01 260;
+    --primary: 0.47 0.17 252;
     --primary-foreground: 1 0 0;
-    --secondary: 0.94 0.01 240;
-    --secondary-foreground: 0.18 0.02 250;
-    --muted: 0.94 0.008 240;
-    --muted-foreground: 0.52 0.02 250;
-    --accent: 0.94 0.01 240;
-    --accent-foreground: 0.18 0.02 250;
+    --secondary: 0.96 0.004 240;
+    --secondary-foreground: 0.13 0.01 260;
+    --muted: 0.96 0.004 240;
+    --muted-foreground: 0.52 0.01 250;
+    --accent: 0.96 0.004 240;
+    --accent-foreground: 0.13 0.01 260;
     --destructive: 0.55 0.22 27;
     --destructive-foreground: 1 0 0;
-    --border: 0.88 0.012 240;
-    --input: 0.88 0.012 240;
-    --ring: 0.42 0.155 252;
-    --radius: 0.5rem;
-    --navy: 0.25 0.06 258;
-    --gold: 0.72 0.17 65;
-    --gold-light: 0.92 0.06 80;
+    --border: 0.91 0.006 240;
+    --input: 0.91 0.006 240;
+    --ring: 0.47 0.17 252;
+    --radius: 0.625rem;
     --success: 0.58 0.16 145;
-    --chart-1: 0.42 0.155 252;
+    --chart-1: 0.47 0.17 252;
     --chart-2: 0.58 0.16 145;
     --chart-3: 0.72 0.17 65;
     --chart-4: 0.55 0.22 27;
     --chart-5: 0.62 0.18 310;
-    --sidebar: 0.25 0.06 258;
-    --sidebar-foreground: 0.94 0.01 240;
-    --sidebar-primary: 0.42 0.155 252;
+    --sidebar: 0.98 0.004 240;
+    --sidebar-foreground: 0.13 0.01 260;
+    --sidebar-primary: 0.47 0.17 252;
     --sidebar-primary-foreground: 1 0 0;
-    --sidebar-accent: 0.3 0.07 258;
-    --sidebar-accent-foreground: 0.94 0.01 240;
-    --sidebar-border: 0.32 0.06 258;
-    --sidebar-ring: 0.42 0.155 252;
+    --sidebar-accent: 0.96 0.004 240;
+    --sidebar-accent-foreground: 0.13 0.01 260;
+    --sidebar-border: 0.91 0.006 240;
+    --sidebar-ring: 0.47 0.17 252;
   }
 }
 
@@ -109,7 +106,7 @@
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -118,7 +115,7 @@
 }
 
 .page-enter {
-  animation: page-enter 0.25s ease-out;
+  animation: page-enter 0.2s ease-out;
 }
 
 .scan-line {

@@ -9,11 +9,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, UserPlus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import CameraSection from "../components/CameraSection";
 import { useActor } from "../hooks/useActor";
 import { useRegisterEmployee } from "../hooks/useQueries";
+import { storeFaceDescriptors } from "../services/FaceRecognitionService";
 
 const DEPARTMENTS = ["Driver", "Office", "Other"];
 
@@ -34,10 +35,12 @@ export default function RegisterPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [showSuccess, setShowSuccess] = useState(false);
 
+  // Face descriptors captured during autoScanMode
+  const descriptorsRef = useRef<Float32Array[]>([]);
+
   const { actor, isFetching: isActorLoading } = useActor();
   const { mutateAsync: registerEmployee, isPending } = useRegisterEmployee();
 
-  // Debug: log when actor becomes available so we know the connection state
   useEffect(() => {
     if (actor) {
       console.log(
@@ -56,11 +59,12 @@ export default function RegisterPage() {
     if (!employeeId.trim()) newErrors.employeeId = "Employee ID is required";
     if (!department) newErrors.department = "Please select a department";
     if (!role.trim()) newErrors.role = "Role / job title is required";
-    if (!photoData) {
+    // In autoScanMode, require face descriptors instead of photo
+    if (descriptorsRef.current.length === 0 && !photoData) {
       newErrors.photo =
-        "Photo is required. Please capture a photo before submitting.";
-      toast.error("Photo is required", {
-        description: "Please capture a photo before submitting.",
+        "Face scan or photo is required. Please complete the face scan.";
+      toast.error("Face scan required", {
+        description: "Please complete the face scan before submitting.",
       });
     }
     setErrors(newErrors);
@@ -104,35 +108,35 @@ export default function RegisterPage() {
           throw err;
         }
       };
+
       const success = await attemptRegister();
 
       if (success) {
+        // Store face descriptors in localStorage for this employee
+        if (descriptorsRef.current.length > 0) {
+          storeFaceDescriptors(employeeId.trim(), descriptorsRef.current);
+        }
+
         setShowSuccess(true);
         toast.success(`Registration submitted for "${name}"!`, {
           description: "Your registration is pending manager approval.",
         });
-        // Reset
+        // Reset form
         setName("");
         setEmployeeId("");
         setDepartment("");
         setRole("");
         setPhotoData(null);
+        descriptorsRef.current = [];
         setErrors({});
         setTimeout(() => setShowSuccess(false), 8000);
       } else {
-        // success === false means the backend rejected the request (e.g. duplicate ID)
-        console.warn(
-          "[RegisterPage] Registration returned false — possible duplicate employee ID:",
-          employeeId,
-        );
         toast.error("Registration failed — ID already exists", {
-          description: `An employee with ID "${employeeId}" may already be registered. Please use a different Employee ID.`,
+          description: `An employee with ID "${employeeId}" may already be registered.`,
         });
       }
     } catch (error) {
       console.error("[RegisterPage] Registration error:", error);
-      // IC errors (IC0508 canister stopped, IC0503 overloaded, etc.) contain
-      // raw JSON that is confusing for users — show a friendly message instead.
       const rawMessage =
         error instanceof Error
           ? error.message
@@ -147,9 +151,7 @@ export default function RegisterPage() {
       const friendlyMessage = isIcError
         ? "The server is temporarily unavailable. Please wait a few seconds and try again."
         : rawMessage || "An unexpected error occurred. Please try again.";
-      toast.error("Registration failed", {
-        description: friendlyMessage,
-      });
+      toast.error("Registration failed", { description: friendlyMessage });
     }
   };
 
@@ -219,7 +221,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-name"
                 type="text"
-                placeholder="Enter full name"
+                placeholder="Full name"
                 value={name}
                 onChange={(e) => {
                   setName(e.target.value);
@@ -251,7 +253,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-id"
                 type="text"
-                placeholder="Enter employee ID"
+                placeholder="Employee ID"
                 value={employeeId}
                 onChange={(e) => {
                   setEmployeeId(e.target.value);
@@ -313,7 +315,7 @@ export default function RegisterPage() {
               <Input
                 id="reg-role"
                 type="text"
-                placeholder="Enter role or job title"
+                placeholder="Role or job title"
                 value={role}
                 onChange={(e) => {
                   setRole(e.target.value);
@@ -333,16 +335,25 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Camera section */}
+          {/* Camera section — autoScanMode for face recognition */}
           <div className="pt-2 border-t border-border">
             <CameraSection
+              autoScanMode={true}
+              onDescriptorsCaptured={(descs) => {
+                descriptorsRef.current = descs;
+                if (errors.photo)
+                  setErrors((p) => ({ ...p, photo: undefined }));
+              }}
               capturedImage={photoData}
               onCapture={(img) => {
                 setPhotoData(img);
                 if (errors.photo)
                   setErrors((p) => ({ ...p, photo: undefined }));
               }}
-              onClear={() => setPhotoData(null)}
+              onClear={() => {
+                setPhotoData(null);
+                descriptorsRef.current = [];
+              }}
               captureButtonOcid="register.capture_button"
               required={true}
               photoError={errors.photo}

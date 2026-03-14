@@ -1909,11 +1909,6 @@ function MarkAttendanceTab() {
   const { mutateAsync: markAttendance, isPending: isMarking } =
     useMarkAttendance();
   const [markingId, setMarkingId] = useState<string | null>(null);
-  const [markingEmployee, setMarkingEmployee] = useState<{
-    name: string;
-    employeeId: string;
-    photoData?: string;
-  } | null>(null);
 
   const approvedEmployees = useMemo(
     () => (employees ?? []).filter((e) => e.approvalStatus === "approved"),
@@ -1936,11 +1931,7 @@ function MarkAttendanceTab() {
 
   const handleMarkPresent = async (employee: (typeof approvedEmployees)[0]) => {
     setMarkingId(employee.employeeId);
-    setMarkingEmployee({
-      name: employee.name,
-      employeeId: employee.employeeId,
-      photoData: employee.photoData ?? "",
-    });
+
     try {
       const result = await markAttendance({
         name: employee.name,
@@ -1982,8 +1973,36 @@ function MarkAttendanceTab() {
     <div className="space-y-5">
       {/* Face Detection Camera */}
       <FaceDetectionCamera
-        markingEmployee={markingEmployee}
-        onMarkingComplete={() => setMarkingEmployee(null)}
+        employees={approvedEmployees}
+        onAttendanceMarked={async (employeeId, employeeName) => {
+          const existingEmp = approvedEmployees.find(
+            (e) => e.employeeId === employeeId,
+          );
+          if (!existingEmp) return;
+          if (markedTodayIds.has(employeeId)) {
+            toast.error(`${employeeName} already checked in today`);
+            return;
+          }
+          const checkInTime = new Date().toLocaleTimeString("en-US", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+          try {
+            const result = await markAttendance({
+              name: employeeName,
+              employeeId,
+              date: today,
+              checkInTime,
+              photoData: "",
+            });
+            if (result) toast.success(`Attendance marked for ${employeeName}`);
+            else toast.error(`Could not mark attendance for ${employeeName}`);
+          } catch {
+            toast.error(`Failed to mark attendance for ${employeeName}`);
+          }
+        }}
       />
       {/* Header */}
       <div

@@ -27,7 +27,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import * as faceapi from "face-api.js";
 import {
   Camera,
   CheckCircle2,
@@ -42,8 +41,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Employee, MonthEndReport } from "../backend.d";
+import FaceDetectionCamera from "../components/FaceDetectionCamera";
 import { useActor } from "../hooks/useActor";
-import { loadFaceModels } from "../hooks/useFaceAPI";
+import { faceapi, loadFaceModels } from "../hooks/useFaceAPI";
 import {
   countWorkingDaysExcludingSundays,
   getCurrentMonth,
@@ -60,9 +60,106 @@ import {
   useRemoveHoliday,
   useSetEmployeePayment,
 } from "../hooks/useQueries";
+import { storeFaceDescriptors } from "../services/FaceRecognitionService";
 
 const MANAGER_PASSWORD = "1234";
-const SCAN_TOTAL = 5;
+const SCAN_TOTAL = 8;
+
+// ─── Face Position Helpers ───────────────────────────────────────────────────
+function evaluateFacePosition(
+  box: { x: number; y: number; width: number; height: number },
+  videoWidth: number,
+  videoHeight: number,
+): { isGood: boolean; instruction: string } {
+  const faceCenterX = box.x + box.width / 2;
+  const faceCenterY = box.y + box.height / 2;
+  const videoCenterX = videoWidth / 2;
+  const videoCenterY = videoHeight / 2;
+  const offsetX = Math.abs(faceCenterX - videoCenterX) / videoWidth;
+  const offsetY = Math.abs(faceCenterY - videoCenterY) / videoHeight;
+  const faceRatio = box.width / videoWidth;
+
+  if (faceRatio < 0.08) return { isGood: false, instruction: "Move closer" };
+  if (faceRatio > 0.85) return { isGood: false, instruction: "Move back" };
+  if (offsetX > 0.38) return { isGood: false, instruction: "Center your face" };
+  if (offsetY > 0.38) return { isGood: false, instruction: "Center your face" };
+  return { isGood: true, instruction: "Good position - Hold still" };
+}
+
+function drawFaceBox(
+  ctx: CanvasRenderingContext2D,
+  box: { x: number; y: number; width: number; height: number },
+  isGood: boolean,
+  instruction: string,
+) {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  // Draw face guide oval
+  const cx = ctx.canvas.width / 2;
+  const cy = ctx.canvas.height / 2;
+  ctx.beginPath();
+  ctx.ellipse(
+    cx,
+    cy,
+    ctx.canvas.width * 0.25,
+    ctx.canvas.height * 0.38,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  ctx.strokeStyle = isGood ? "rgba(0,230,100,0.3)" : "rgba(255,80,80,0.3)";
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const color = isGood ? "#00e664" : "#ff4444";
+  const { x, y, width, height } = box;
+  const cornerLen = Math.min(width, height) * 0.18;
+
+  // Main box
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, width, height);
+
+  // Corner accents (thicker)
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  // TL
+  ctx.moveTo(x, y + cornerLen);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + cornerLen, y);
+  // TR
+  ctx.moveTo(x + width - cornerLen, y);
+  ctx.lineTo(x + width, y);
+  ctx.lineTo(x + width, y + cornerLen);
+  // BL
+  ctx.moveTo(x, y + height - cornerLen);
+  ctx.lineTo(x, y + height);
+  ctx.lineTo(x + cornerLen, y + height);
+  // BR
+  ctx.moveTo(x + width - cornerLen, y + height);
+  ctx.lineTo(x + width, y + height);
+  ctx.lineTo(x + width, y + height - cornerLen);
+  ctx.stroke();
+
+  // Instruction text
+  const padding = 6;
+  const fontSize = Math.max(11, Math.min(14, width * 0.1));
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  const textW = ctx.measureText(instruction).width;
+  const textX = x + (width - textW) / 2;
+  const textY = y + height + fontSize + padding;
+  ctx.fillStyle = isGood ? "rgba(0,200,80,0.85)" : "rgba(220,50,50,0.85)";
+  ctx.fillRect(
+    textX - padding,
+    textY - fontSize - 2,
+    textW + padding * 2,
+    fontSize + padding,
+  );
+  ctx.fillStyle = "#fff";
+  ctx.fillText(instruction, textX, textY - 2);
+}
 
 // ─── Login Screen ───────────────────────────────────────────────────────────
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
@@ -83,10 +180,12 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     <div className="min-h-[60vh] flex items-center justify-center px-4">
       <Card className="w-full max-w-sm shadow-card">
         <CardHeader className="text-center pb-2">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
-            <Lock className="w-5 h-5 text-primary" />
+          <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-6 h-6 text-foreground" />
           </div>
-          <CardTitle className="text-xl">Manager Login</CardTitle>
+          <CardTitle className="text-2xl font-extrabold">
+            Manager Login
+          </CardTitle>
           <p className="text-sm text-muted-foreground">
             Enter your password to access the portal
           </p>
@@ -152,7 +251,6 @@ function RegisterTab() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descriptorsRef = useRef<Float32Array[]>([]);
-  const pendingStreamRef = useRef<MediaStream | null>(null);
 
   const stopCamera = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -169,14 +267,11 @@ function RegisterTab() {
 
   // Set srcObject after video element is in DOM
   useEffect(() => {
-    if (
-      scanPhase === "scanning" &&
-      pendingStreamRef.current &&
-      videoRef.current
-    ) {
-      videoRef.current.srcObject = pendingStreamRef.current;
-      videoRef.current.play().catch(() => {});
-      pendingStreamRef.current = null;
+    if (scanPhase === "scanning" && streamRef.current && videoRef.current) {
+      if (!videoRef.current.srcObject) {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.play().catch(() => {});
+      }
     }
   }, [scanPhase]);
 
@@ -197,13 +292,13 @@ function RegisterTab() {
       return;
     }
 
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480 },
         audio: false,
       });
       streamRef.current = stream;
-      pendingStreamRef.current = stream;
     } catch {
       setScanPhase("error");
       setScanError("Camera access denied. Please allow camera permission.");
@@ -212,39 +307,93 @@ function RegisterTab() {
 
     setScanPhase("scanning");
 
-    // Fail-safe timeout: 15 seconds
+    // Directly assign srcObject — don't rely solely on useEffect (React may not flush yet)
+    await new Promise((r) => setTimeout(r, 80));
+    if (videoRef.current && !videoRef.current.srcObject) {
+      videoRef.current.srcObject = stream;
+      try {
+        await videoRef.current.play();
+      } catch {}
+    }
+    // Retry if still not assigned
+    if (!videoRef.current?.srcObject) {
+      await new Promise((r) => setTimeout(r, 150));
+      if (videoRef.current && !videoRef.current.srcObject) {
+        videoRef.current.srcObject = stream;
+        try {
+          await videoRef.current.play();
+        } catch {}
+      }
+    }
+
+    // Poll until video is delivering frames (max 10s)
+    const waitForVideo = async (): Promise<HTMLVideoElement | null> => {
+      for (let i = 0; i < 100; i++) {
+        const vid = videoRef.current;
+        if (vid && vid.videoWidth > 0) return vid;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return null;
+    };
+
+    const video = await waitForVideo();
+    if (!video) {
+      setScanPhase("error");
+      setScanError("Camera failed to start. Please try again.");
+      return;
+    }
+
+    // Fail-safe timeout: 30 seconds from when video is ready
     timeoutRef.current = setTimeout(() => {
       if (descriptorsRef.current.length < SCAN_TOTAL) {
         if (intervalRef.current) clearInterval(intervalRef.current);
         stopCamera();
         setScanPhase("error");
         setScanError(
-          "Face not detected after 15 seconds. Ensure good lighting and face the camera directly.",
+          "Face not detected. Ensure good lighting and face the camera directly.",
         );
       }
-    }, 15000);
+    }, 30000);
 
     intervalRef.current = setInterval(async () => {
-      const video = videoRef.current;
+      const vid = videoRef.current;
       const canvas = canvasRef.current;
-      if (!video || video.readyState < 2 || !canvas) return;
+      if (!vid || vid.videoWidth === 0 || !canvas) return;
       if (descriptorsRef.current.length >= SCAN_TOTAL) return;
 
       try {
         const detection = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+          .detectSingleFace(
+            vid,
+            new faceapi.TinyFaceDetectorOptions({
+              inputSize: 224,
+              scoreThreshold: 0.2,
+            }),
+          )
           .withFaceLandmarks()
           .withFaceDescriptor();
 
         if (!detection) return;
 
-        // Draw bounding box
-        const dims = faceapi.matchDimensions(canvas, video, true);
+        // Draw bounding box with position feedback
+        canvas.width = vid.videoWidth || canvas.offsetWidth;
+        canvas.height = vid.videoHeight || canvas.offsetHeight;
+        const dims = faceapi.matchDimensions(canvas, vid, true);
         const resized = faceapi.resizeResults(detection, dims);
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          faceapi.draw.drawDetections(canvas, [resized]);
+          const box = resized.detection.box;
+          const pos = evaluateFacePosition(
+            { x: box.x, y: box.y, width: box.width, height: box.height },
+            canvas.width,
+            canvas.height,
+          );
+          drawFaceBox(
+            ctx,
+            { x: box.x, y: box.y, width: box.width, height: box.height },
+            pos.isGood,
+            pos.instruction,
+          );
         }
 
         descriptorsRef.current = [
@@ -264,7 +413,7 @@ function RegisterTab() {
       } catch {
         // Silently continue if detection fails on a frame
       }
-    }, 1500);
+    }, 400);
   };
 
   const resetScan = () => {
@@ -283,7 +432,7 @@ function RegisterTab() {
       return;
     }
     if (faceDescriptors.length < SCAN_TOTAL) {
-      toast.error("Please complete the face scan (5/5) first.");
+      toast.error("Please complete the face scan (8/8) first.");
       return;
     }
     const descriptorJson = JSON.stringify(
@@ -298,6 +447,10 @@ function RegisterTab() {
         photoData: descriptorJson,
       });
       if (result) {
+        // Store face descriptors in localStorage for offline face matching
+        if (descriptorsRef.current.length > 0) {
+          storeFaceDescriptors(empId, descriptorsRef.current);
+        }
         toast.success(
           "Employee registered successfully! Awaiting manager approval.",
         );
@@ -322,7 +475,7 @@ function RegisterTab() {
           <Input
             id="reg-name"
             data-ocid="register.name.input"
-            placeholder="e.g. John Doe"
+            placeholder="Full name"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -332,7 +485,7 @@ function RegisterTab() {
           <Input
             id="reg-id"
             data-ocid="register.id.input"
-            placeholder="e.g. EMP001"
+            placeholder="Employee ID"
             value={empId}
             onChange={(e) => setEmpId(e.target.value)}
           />
@@ -356,7 +509,7 @@ function RegisterTab() {
             id="reg-salary"
             data-ocid="register.salary.input"
             type="number"
-            placeholder="e.g. 25000"
+            placeholder="Salary amount"
             value={salary}
             onChange={(e) => setSalary(e.target.value)}
             min="1"
@@ -373,7 +526,7 @@ function RegisterTab() {
             {scanPhase === "idle" && (
               <div className="text-center py-4">
                 <p className="text-sm text-muted-foreground mb-3">
-                  Scan employee's face 5 times for accurate recognition
+                  Scan employee's face 8 times for accurate recognition
                 </p>
                 <Button
                   type="button"
@@ -429,9 +582,10 @@ function RegisterTab() {
                     </div>
                   )}
                   {scanPhase === "scanning" && (
-                    <div className="absolute top-2 left-2 bg-black/60 rounded px-2 py-1">
-                      <span className="text-green-400 text-xs font-mono">
-                        Scanning... {scanCount}/{SCAN_TOTAL}
+                    <div className="absolute top-2 left-2 bg-black/70 rounded-lg px-3 py-1.5 flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                      <span className="text-green-400 text-xs font-mono font-semibold">
+                        🔍 Scanning... {scanCount}/{SCAN_TOTAL}
                       </span>
                     </div>
                   )}
@@ -569,7 +723,7 @@ function ApproveDialog({
               id="approve-salary"
               data-ocid="approve.salary.input"
               type="number"
-              placeholder="e.g. 25000"
+              placeholder="Salary amount"
               value={salary}
               onChange={(e) => setSalary(e.target.value)}
               min="1"
@@ -868,410 +1022,64 @@ function RegisteredTab() {
   );
 }
 
-// ─── Face Detection Camera (Mark Attendance) ──────────────────────────────────
-function FaceDetectionCamera({ employees }: { employees: Employee[] }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isMarkingRef = useRef(false);
-
-  const [camStatus, setCamStatus] = useState<"loading" | "live" | "error">(
-    "loading",
-  );
-  const [modelsReady, setModelsReady] = useState(false);
-  const [matcherReady, setMatcherReady] = useState(false);
-  const [statusMsg, setStatusMsg] = useState(
-    "Position face in front of camera",
-  );
-  const [statusColor, setStatusColor] = useState<
-    "gray" | "yellow" | "green" | "red"
-  >("gray");
-  const [verifiedEmp, setVerifiedEmp] = useState<Employee | null>(null);
-  const [verifiedTime, setVerifiedTime] = useState("");
-  const [markedIds, setMarkedIds] = useState<Set<string>>(new Set());
-  const [noFaceData, setNoFaceData] = useState(false);
-
-  const markMutation = useMarkAttendance();
-  const { actor } = useActor();
-
-  // Build FaceMatcher from employee descriptors
-  const matcherRef = useRef<faceapi.FaceMatcher | null>(null);
-
-  // Load models & camera
-  useEffect(() => {
-    let cancelled = false;
-
-    const init = async () => {
-      // Load models
-      try {
-        await loadFaceModels();
-        if (cancelled) return;
-        setModelsReady(true);
-      } catch {
-        if (!cancelled) {
-          setCamStatus("error");
-          setStatusMsg("Failed to load face recognition models.");
-        }
-        return;
-      }
-
-      // Start camera
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: false,
-        });
-        if (cancelled) {
-          for (const t of stream.getTracks()) t.stop();
-          return;
-        }
-        streamRef.current = stream;
-        setCamStatus("live");
-      } catch {
-        if (!cancelled) {
-          setCamStatus("error");
-          setStatusMsg("Camera access denied. Please allow camera permission.");
-        }
-      }
-    };
-
-    init();
-    return () => {
-      cancelled = true;
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      if (streamRef.current) {
-        for (const t of streamRef.current.getTracks()) t.stop();
-      }
-    };
-  }, []);
-
-  // Set srcObject after video element is in DOM (camStatus transitions to "live")
-  useEffect(() => {
-    if (
-      camStatus === "live" &&
-      streamRef.current &&
-      videoRef.current &&
-      !videoRef.current.srcObject
-    ) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
-    }
-  }, [camStatus]);
-
-  // Build matcher when models ready + employees available
-  useEffect(() => {
-    if (!modelsReady) return;
-
-    const validEmployees = employees.filter((e) => {
-      if (!e.photoData || e.photoData.length < 10) return false;
-      try {
-        const parsed = JSON.parse(e.photoData);
-        return Array.isArray(parsed) && parsed.length > 0;
-      } catch {
-        return false;
-      }
-    });
-
-    if (validEmployees.length === 0) {
-      setNoFaceData(true);
-      setMatcherReady(true);
-      return;
-    }
-
-    try {
-      const labeledDescriptors = validEmployees.map((emp) => {
-        const descriptorsData = JSON.parse(emp.photoData) as number[][];
-        const descriptors = descriptorsData.map((d) => new Float32Array(d));
-        return new faceapi.LabeledFaceDescriptors(emp.employeeId, descriptors);
-      });
-      matcherRef.current = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
-      setNoFaceData(false);
-      setMatcherReady(true);
-    } catch {
-      setNoFaceData(true);
-      setMatcherReady(true);
-    }
-  }, [modelsReady, employees]);
-
-  // Load already-marked IDs for today
-  useEffect(() => {
-    if (!actor || employees.length === 0) return;
-    const today = getTodayDate();
-    Promise.all(
-      employees.map(async (emp) => {
-        const marked = await actor.checkIfAttendanceMarkedToday(
-          emp.employeeId,
-          today,
-        );
-        return { id: emp.employeeId, marked };
-      }),
-    ).then((results) => {
-      const ids = new Set(results.filter((r) => r.marked).map((r) => r.id));
-      setMarkedIds(ids);
-    });
-  }, [actor, employees]);
-
-  // Detection loop
-  useEffect(() => {
-    if (camStatus !== "live" || !matcherReady || noFaceData) return;
-    if (!matcherRef.current) return;
-
-    intervalRef.current = setInterval(async () => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      if (!video || video.readyState < 2 || !canvas || isMarkingRef.current)
-        return;
-
-      try {
-        const detection = await faceapi
-          .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
-          .withFaceLandmarks()
-          .withFaceDescriptor();
-
-        if (!detection) {
-          const ctx = canvas.getContext("2d");
-          if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-          setStatusMsg("Position face in front of camera");
-          setStatusColor("gray");
-          return;
-        }
-
-        // Draw bounding box
-        const dims = faceapi.matchDimensions(canvas, video, true);
-        const resized = faceapi.resizeResults(detection, dims);
-        const ctx = canvas.getContext("2d");
-        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-        faceapi.draw.drawDetections(canvas, [resized]);
-
-        setStatusMsg("Face detected, identifying...");
-        setStatusColor("yellow");
-
-        if (!matcherRef.current) return;
-        const match = matcherRef.current.findBestMatch(detection.descriptor);
-
-        if (match.label === "unknown") {
-          setStatusMsg("Face Not Recognized");
-          setStatusColor("red");
-          return;
-        }
-
-        // Found a match
-        const emp = employees.find((e) => e.employeeId === match.label);
-        if (!emp) return;
-
-        if (markedIds.has(emp.employeeId)) {
-          setStatusMsg(`✓ ${emp.name} — Already marked today`);
-          setStatusColor("green");
-          return;
-        }
-
-        // Mark attendance
-        isMarkingRef.current = true;
-        const today = getTodayDate();
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-
-        try {
-          const result = await markMutation.mutateAsync({
-            name: emp.name,
-            employeeId: emp.employeeId,
-            date: today,
-            checkInTime: timeStr,
-            photoData: "",
-          });
-
-          if (result) {
-            setVerifiedEmp(emp);
-            setVerifiedTime(timeStr);
-            setMarkedIds((prev) => new Set(prev).add(emp.employeeId));
-            setStatusMsg(`✓ IDENTITY VERIFIED — ${emp.name} • ${timeStr}`);
-            setStatusColor("green");
-            toast.success(`${emp.name} marked present at ${timeStr}`);
-
-            // Clear canvas and resume after 4 seconds
-            setTimeout(() => {
-              isMarkingRef.current = false;
-              setVerifiedEmp(null);
-              setStatusMsg("Position face in front of camera");
-              setStatusColor("gray");
-            }, 4000);
-          } else {
-            isMarkingRef.current = false;
-          }
-        } catch {
-          isMarkingRef.current = false;
-          toast.error("Failed to mark attendance.");
-        }
-      } catch {
-        // Silently continue on detection error
-      }
-    }, 600);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [camStatus, matcherReady, noFaceData, employees, markedIds, markMutation]);
-
-  const statusBg =
-    statusColor === "green"
-      ? "bg-green-500/90 text-white"
-      : statusColor === "yellow"
-        ? "bg-yellow-500/90 text-black"
-        : statusColor === "red"
-          ? "bg-red-500/90 text-white"
-          : "bg-black/60 text-white/70";
-
-  return (
-    <div className="space-y-4">
-      {/* Camera */}
-      <div
-        className="relative bg-black rounded-xl overflow-hidden"
-        style={{ height: 300 }}
-      >
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="w-full h-full object-cover"
-          style={{ display: camStatus === "live" ? "block" : "none" }}
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
-          style={{ display: camStatus === "live" ? "block" : "none" }}
-        />
-
-        {/* Loading state */}
-        {camStatus === "loading" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-            <Loader2 className="w-8 h-8 text-white/60 animate-spin" />
-            <p className="text-white/60 text-sm">
-              Loading face recognition models...
-            </p>
-          </div>
-        )}
-
-        {/* Error state */}
-        {camStatus === "error" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6">
-            <Camera className="w-8 h-8 text-white/30" />
-            <p className="text-white/60 text-sm text-center">{statusMsg}</p>
-          </div>
-        )}
-
-        {/* LIVE badge */}
-        {camStatus === "live" && (
-          <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 rounded-full px-2 py-1">
-            <span
-              className="w-2 h-2 rounded-full bg-red-500"
-              style={{ animation: "blink-dot 1.2s ease-in-out infinite" }}
-            />
-            <span className="text-white text-xs font-bold tracking-widest">
-              LIVE
-            </span>
-          </div>
-        )}
-
-        {/* Verified banner */}
-        {verifiedEmp && camStatus === "live" && (
-          <div className="absolute bottom-0 left-0 right-0 bg-green-600/90 text-white p-3 flex items-center gap-3">
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-            <div className="min-w-0">
-              <p className="font-bold text-sm">IDENTITY VERIFIED</p>
-              <p className="text-xs opacity-90">
-                {verifiedEmp.name} — {verifiedTime}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Status bar */}
-      {camStatus === "live" && (
-        <div
-          className={`rounded-lg px-4 py-2 text-sm font-medium text-center ${statusBg}`}
-        >
-          {statusMsg}
-        </div>
-      )}
-
-      {/* No face data warning */}
-      {noFaceData && (
-        <div
-          data-ocid="attendance.no_face_data.error_state"
-          className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-        >
-          No face data found for employees. Please register employees with face
-          scan first.
-        </div>
-      )}
-
-      {/* Employee list */}
-      {employees.length === 0 ? (
-        <div
-          data-ocid="attendance.mark.empty_state"
-          className="text-center py-8 text-muted-foreground"
-        >
-          <p>No approved employees found.</p>
-        </div>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>ID</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead className="text-right">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {employees.map((emp, idx) => (
-              <TableRow key={emp.employeeId} data-ocid={`mark.item.${idx + 1}`}>
-                <TableCell className="font-medium">{emp.name}</TableCell>
-                <TableCell className="text-muted-foreground">
-                  {emp.employeeId}
-                </TableCell>
-                <TableCell>{emp.department}</TableCell>
-                <TableCell className="text-right">
-                  {markedIds.has(emp.employeeId) ? (
-                    <Badge className="bg-success/10 text-success border-success/30">
-                      <CheckCircle2 className="w-3 h-3 mr-1" /> Present Today
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      Absent
-                    </Badge>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-
-      <style>{`
-        @keyframes blink-dot {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.2; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
 // ─── Mark Attendance Tab ───────────────────────────────────────────────────────
 function MarkAttendanceTab() {
   const { data: employees = [], isLoading } = useAllEmployees();
+  const markMutation = useMarkAttendance();
+  const { actor } = useActor();
+
   const approvedEmployees = employees.filter(
     (e) => e.approvalStatus === "approved",
+  );
+
+  const handleAttendanceMarked = useCallback(
+    async (employeeId: string, employeeName: string) => {
+      const today = getTodayDate();
+      const now = new Date();
+      const checkInTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+      // Check for duplicate attendance
+      try {
+        if (actor) {
+          const alreadyMarked = await actor.checkIfAttendanceMarkedToday(
+            employeeId,
+            today,
+          );
+          if (alreadyMarked) {
+            toast.error(`${employeeName} already checked in today`);
+            return;
+          }
+        }
+        const success = await markMutation.mutateAsync({
+          name: employeeName,
+          employeeId,
+          date: today,
+          checkInTime,
+          photoData: "",
+        });
+        if (success) {
+          toast.success(
+            `Attendance marked for ${employeeName} at ${checkInTime}`,
+          );
+        } else {
+          toast.error(`Could not mark attendance for ${employeeName}`);
+        }
+      } catch {
+        toast.error(`Failed to mark attendance for ${employeeName}`);
+      }
+    },
+    [actor, markMutation],
   );
 
   if (isLoading)
     return <Skeleton className="h-48 w-full" data-ocid="mark.loading_state" />;
 
-  return <FaceDetectionCamera employees={approvedEmployees} />;
+  return (
+    <FaceDetectionCamera
+      employees={approvedEmployees}
+      onAttendanceMarked={handleAttendanceMarked}
+    />
+  );
 }
 
 // ─── Attendance Overview Tab ───────────────────────────────────────────────────
@@ -1418,7 +1226,7 @@ function HolidaysTab() {
             />
             <Input
               data-ocid="holiday.reason.input"
-              placeholder="Reason (e.g. Diwali)"
+              placeholder="Holiday reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="flex-1 min-w-32"
@@ -1494,7 +1302,9 @@ export default function ManagerPortalPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Manager Portal</h1>
+          <h1 className="text-3xl font-extrabold text-foreground tracking-tight">
+            Manager Portal
+          </h1>
           <p className="text-sm text-muted-foreground">
             Manage employees, attendance, and payroll
           </p>
@@ -1511,7 +1321,7 @@ export default function ManagerPortalPage() {
       </div>
 
       <Tabs defaultValue="register">
-        <TabsList className="mb-6 flex flex-wrap h-auto gap-1">
+        <TabsList className="mb-6 flex flex-wrap h-auto gap-1 bg-muted p-1 rounded-xl">
           <TabsTrigger data-ocid="manager.register.tab" value="register">
             Register Employee
           </TabsTrigger>
@@ -1530,9 +1340,11 @@ export default function ManagerPortalPage() {
         </TabsList>
 
         <TabsContent value="register">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Register New Employee</CardTitle>
+          <Card className="shadow-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-extrabold">
+                Register New Employee
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <RegisterTab />
@@ -1541,9 +1353,11 @@ export default function ManagerPortalPage() {
         </TabsContent>
 
         <TabsContent value="employees">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Registered Employees</CardTitle>
+          <Card className="shadow-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-extrabold">
+                Registered Employees
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <RegisteredTab />
@@ -1552,9 +1366,11 @@ export default function ManagerPortalPage() {
         </TabsContent>
 
         <TabsContent value="mark">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Mark Daily Attendance</CardTitle>
+          <Card className="shadow-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-extrabold">
+                Mark Daily Attendance
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <MarkAttendanceTab />
@@ -1563,9 +1379,11 @@ export default function ManagerPortalPage() {
         </TabsContent>
 
         <TabsContent value="overview">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Attendance Overview</CardTitle>
+          <Card className="shadow-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-extrabold">
+                Attendance Overview
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <AttendanceOverviewTab />
@@ -1574,9 +1392,11 @@ export default function ManagerPortalPage() {
         </TabsContent>
 
         <TabsContent value="holidays">
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Holiday Management</CardTitle>
+          <Card className="shadow-card border-border">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg font-extrabold">
+                Holiday Management
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <HolidaysTab />

@@ -16,8 +16,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        display: ['"Mona Sans"', "sans-serif"],
-        body: ["Outfit", "sans-serif"],
+        display: ['"Plus Jakarta Sans"', "sans-serif"],
+        body: ['"Plus Jakarta Sans"', "sans-serif"],
+        sans: ['"Plus Jakarta Sans"', "sans-serif"],
       },
       colors: {
         border: "oklch(var(--border))",
@@ -70,9 +71,6 @@ export default {
           border: "oklch(var(--sidebar-border))",
           ring: "oklch(var(--sidebar-ring))",
         },
-        navy: "oklch(var(--navy))",
-        gold: "oklch(var(--gold))",
-        "gold-light": "oklch(var(--gold-light))",
         success: "oklch(var(--success))",
       },
       borderRadius: {
@@ -81,10 +79,9 @@ export default {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        xs: "0 1px 2px 0 rgba(0,0,0,0.05)",
-        card: "0 1px 3px oklch(var(--navy) / 0.08), 0 4px 16px oklch(var(--navy) / 0.06)",
-        "card-hover": "0 4px 24px oklch(var(--navy) / 0.12)",
-        gold: "0 4px 12px oklch(var(--gold) / 0.4)",
+        xs: "0 1px 2px 0 rgba(0,0,0,0.04)",
+        card: "0 1px 3px rgba(0,0,0,0.06), 0 1px 8px rgba(0,0,0,0.04)",
+        "card-hover": "0 4px 20px rgba(0,0,0,0.10)",
       },
       keyframes: {
         "accordion-down": {

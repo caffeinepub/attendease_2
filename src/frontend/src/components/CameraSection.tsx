@@ -1,13 +1,20 @@
 import { Button } from "@/components/ui/button";
 import {
   Camera,
+  CheckCircle2,
   RefreshCw,
   RotateCcw,
   ShieldCheck,
   X,
   ZapOff,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  detectFaceDescriptorOnly,
+  loadFaceModels,
+} from "../services/FaceRecognitionService";
+
+const AUTO_SCAN_TOTAL = 8;
 
 interface CameraSectionProps {
   capturedImage: string | null;
@@ -16,16 +23,22 @@ interface CameraSectionProps {
   captureButtonOcid?: string;
   required?: boolean;
   photoError?: string;
+  /** When true: skip manual capture, auto-scan face 8 times and collect descriptors */
+  autoScanMode?: boolean;
+  /** Called with the 8 collected face descriptors once scanning is complete */
+  onDescriptorsCaptured?: (descriptors: Float32Array[]) => void;
 }
 
 type CameraState =
-  | "idle" // Show pre-prompt: explain we need camera & ask user to allow
-  | "requesting" // getUserMedia in-flight — Chrome permission dialog visible
-  | "live" // Camera on, video feed showing
-  | "denied" // Permission denied
-  | "unsupported" // Browser doesn't support getUserMedia
-  | "error" // Other camera error
-  | "captured"; // Photo captured
+  | "idle"
+  | "requesting"
+  | "live"
+  | "denied"
+  | "unsupported"
+  | "error"
+  | "captured"
+  | "scanning" // autoScanMode: scanning in progress
+  | "scan_done"; // autoScanMode: all scans collected
 
 export default function CameraSection({
   capturedImage,
@@ -34,29 +47,88 @@ export default function CameraSection({
   captureButtonOcid = "camera.capture_button",
   required = false,
   photoError,
+  autoScanMode = false,
+  onDescriptorsCaptured,
 }: CameraSectionProps) {
   const [cameraState, setCameraState] = useState<CameraState>(
     capturedImage ? "captured" : "idle",
   );
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [scanCount, setScanCount] = useState(0);
+  const [faceDetected, setFaceDetected] = useState(false);
 
-  // videoRef is attached to a <video> that is ALWAYS rendered in the DOM.
-  // We only toggle its display via cameraState so the ref is never null
-  // when getUserMedia resolves — eliminates the race condition.
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const descriptorsRef = useRef<Float32Array[]>([]);
 
-  const stopStream = () => {
+  const stopStream = useCallback(() => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
     if (streamRef.current) {
       for (const track of streamRef.current.getTracks()) track.stop();
       streamRef.current = null;
     }
     if (videoRef.current) videoRef.current.srcObject = null;
-  };
+  }, []);
 
-  // Trigger getUserMedia → Chrome native permission dialog appears
-  const handleRequestCamera = async () => {
+  useEffect(() => {
+    return () => stopStream();
+  }, [stopStream]);
+
+  const startAutoScan = useCallback(
+    async (stream: MediaStream) => {
+      setCameraState("scanning");
+      descriptorsRef.current = [];
+      setScanCount(0);
+      setFaceDetected(false);
+
+      const video = videoRef.current!;
+      video.srcObject = stream;
+      video.muted = true;
+
+      await new Promise<void>((resolve) => {
+        const onReady = () => {
+          video.removeEventListener("canplay", onReady);
+          resolve();
+        };
+        video.addEventListener("canplay", onReady);
+        video.play().catch(() => resolve());
+        setTimeout(resolve, 3000);
+      });
+
+      scanIntervalRef.current = setInterval(async () => {
+        if (descriptorsRef.current.length >= AUTO_SCAN_TOTAL) return;
+        const vid = videoRef.current;
+        if (!vid || vid.readyState < 2 || vid.videoWidth === 0) return;
+
+        const descriptor = await detectFaceDescriptorOnly(vid);
+        if (!descriptor) {
+          setFaceDetected(false);
+          return;
+        }
+
+        setFaceDetected(true);
+        descriptorsRef.current = [...descriptorsRef.current, descriptor];
+        const count = descriptorsRef.current.length;
+        setScanCount(count);
+
+        if (count >= AUTO_SCAN_TOTAL) {
+          clearInterval(scanIntervalRef.current!);
+          scanIntervalRef.current = null;
+          stopStream();
+          setCameraState("scan_done");
+          onDescriptorsCaptured?.(descriptorsRef.current);
+        }
+      }, 800);
+    },
+    [onDescriptorsCaptured, stopStream],
+  );
+
+  const handleRequestCamera = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraState("unsupported");
       return;
@@ -66,21 +138,36 @@ export default function CameraSection({
     setErrorMessage("");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Pre-load face models in autoScanMode
+      if (autoScanMode) {
+        try {
+          await loadFaceModels();
+        } catch {
+          setCameraState("error");
+          setErrorMessage(
+            "Failed to load face recognition models. Check your connection.",
+          );
+          return;
+        }
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+      });
       streamRef.current = stream;
 
-      // videoRef.current is guaranteed non-null because the <video> element
-      // is always in the DOM (just hidden).
-      const video = videoRef.current!;
-      video.srcObject = stream;
-      video.muted = true;
-      // Set state to "live" first — this makes display: "block" kick in via
-      // React's next render, then play(). autoPlay also handles most browsers.
-      setCameraState("live");
-      try {
-        await video.play();
-      } catch {
-        // autoPlay handles it; non-fatal
+      if (autoScanMode) {
+        await startAutoScan(stream);
+      } else {
+        const video = videoRef.current!;
+        video.srcObject = stream;
+        video.muted = true;
+        setCameraState("live");
+        try {
+          await video.play();
+        } catch {
+          // autoPlay handles it
+        }
       }
     } catch (err: unknown) {
       stopStream();
@@ -100,14 +187,13 @@ export default function CameraSection({
         );
       }
     }
-  };
+  }, [autoScanMode, startAutoScan, stopStream]);
 
   const handleCapture = () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // Capture at a visible resolution for local preview only — not sent to backend
     const TARGET_W = 320;
     const TARGET_H = 240;
     const srcW = video.videoWidth || 640;
@@ -123,7 +209,6 @@ export default function CameraSection({
     ctx.restore();
 
     const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-
     stopStream();
     setCameraState("captured");
     onCapture(dataUrl);
@@ -132,45 +217,112 @@ export default function CameraSection({
   const handleRetake = () => {
     stopStream();
     onClear();
+    descriptorsRef.current = [];
+    setScanCount(0);
+    setFaceDetected(false);
     setCameraState("idle");
     setErrorMessage("");
   };
 
+  const isAutoScanning =
+    cameraState === "scanning" || cameraState === "requesting";
+  const scanDone = cameraState === "scan_done";
+
   return (
     <div>
-      {/* Hidden canvas used only during capture */}
+      {/* Hidden canvas used only during manual capture */}
       <canvas ref={canvasRef} style={{ display: "none" }} />
 
-      {/* ─────────────────────────────────────────────────────────────
-          The <video> element is ALWAYS in the DOM regardless of state.
-          We toggle visibility via display so videoRef.current is never
-          null when getUserMedia resolves (fixes the race condition).
-      ───────────────────────────────────────────────────────────── */}
+      {/* Video element — always in DOM; hidden unless camera is live */}
       <div
         className="rounded-xl overflow-hidden border mb-3"
         style={{
           borderColor: "oklch(var(--navy) / 0.15)",
-          display: cameraState === "live" ? "block" : "none",
+          display: cameraState === "live" || isAutoScanning ? "block" : "none",
         }}
       >
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          style={{
-            width: "100%",
-            height: "220px",
-            objectFit: "cover",
-            display: "block",
-            transform: "scaleX(-1)",
-            background: "#ddd",
-          }}
-        />
+        <div className="relative">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              width: "100%",
+              height: "220px",
+              objectFit: "cover",
+              display: "block",
+              transform: "scaleX(-1)",
+              background: "#ddd",
+            }}
+          />
+
+          {/* Auto-scan overlay */}
+          {isAutoScanning && (
+            <div className="absolute inset-0 pointer-events-none">
+              {/* Dashed oval guide */}
+              <svg
+                className="absolute inset-0 w-full h-full"
+                viewBox="0 0 640 480"
+                preserveAspectRatio="none"
+                aria-label="Face alignment guide"
+              >
+                <title>Face alignment guide</title>
+                <ellipse
+                  cx="320"
+                  cy="240"
+                  rx="130"
+                  ry="175"
+                  fill="none"
+                  stroke={faceDetected ? "#00e664" : "rgba(255,255,255,0.45)"}
+                  strokeWidth="3"
+                  strokeDasharray={faceDetected ? "0" : "12 8"}
+                />
+              </svg>
+
+              {/* Scan counter */}
+              <div
+                className="absolute top-2 left-2 flex items-center gap-2 px-3 py-1.5 rounded-lg"
+                style={{ background: "rgba(0,0,0,0.7)" }}
+              >
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={{
+                    background: faceDetected ? "#00e664" : "#ff4444",
+                    animation: faceDetected
+                      ? "none"
+                      : "blink-dot 1s ease-in-out infinite",
+                  }}
+                />
+                <span
+                  className="text-xs font-mono font-semibold"
+                  style={{ color: faceDetected ? "#00e664" : "#fff" }}
+                >
+                  {faceDetected ? "Face detected" : "Looking for face..."}{" "}
+                  {scanCount}/{AUTO_SCAN_TOTAL}
+                </span>
+              </div>
+
+              {/* Progress bar */}
+              <div
+                className="absolute bottom-0 left-0 right-0 h-1"
+                style={{ background: "rgba(0,0,0,0.5)" }}
+              >
+                <div
+                  className="h-full transition-all duration-300"
+                  style={{
+                    width: `${(scanCount / AUTO_SCAN_TOTAL) * 100}%`,
+                    background: "#00e664",
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <p className="text-sm font-semibold text-foreground mb-3">
-        Photo Capture{" "}
+        {autoScanMode ? "Face Scan" : "Photo Capture"}{" "}
         {required ? (
           <span className="text-destructive">*</span>
         ) : (
@@ -178,7 +330,7 @@ export default function CameraSection({
         )}
       </p>
 
-      {/* ── IDLE: Chrome-style permission pre-prompt ── */}
+      {/* ── IDLE ── */}
       {cameraState === "idle" && (
         <div
           className="rounded-xl border overflow-hidden"
@@ -187,7 +339,6 @@ export default function CameraSection({
             background: "oklch(var(--navy) / 0.02)",
           }}
         >
-          {/* Chrome-style permission bar */}
           <div
             className="flex items-start gap-3 px-4 py-4 border-b"
             style={{
@@ -206,13 +357,12 @@ export default function CameraSection({
                 AttendEase wants to use your camera
               </p>
               <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
-                Camera is required to capture your photo for registration.
-                Chrome will ask you to <strong>Allow</strong> or{" "}
-                <strong>Block</strong> — please choose <strong>Allow</strong>.
+                {autoScanMode
+                  ? "Camera is required to scan the employee's face for recognition. The system will capture 8 face scans automatically."
+                  : "Camera is required to capture your photo for registration. Chrome will ask you to Allow or Block — please choose Allow."}
               </p>
             </div>
           </div>
-          {/* Action buttons */}
           <div
             className="flex items-center justify-end gap-2 px-4 py-3"
             style={{ background: "oklch(0.97 0.003 240)" }}
@@ -246,7 +396,7 @@ export default function CameraSection({
         </div>
       )}
 
-      {/* ── REQUESTING: Chrome permission dialog is open ── */}
+      {/* ── REQUESTING ── */}
       {cameraState === "requesting" && (
         <div
           className="rounded-xl border overflow-hidden"
@@ -263,19 +413,23 @@ export default function CameraSection({
             />
             <div>
               <p className="text-sm font-semibold text-foreground">
-                Waiting for camera permission...
+                {autoScanMode
+                  ? "Loading face recognition models..."
+                  : "Waiting for camera permission..."}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                A Chrome dialog should appear — click <strong>Allow</strong> to
-                continue.
-              </p>
+              {!autoScanMode && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  A Chrome dialog should appear — click <strong>Allow</strong>{" "}
+                  to continue.
+                </p>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── LIVE: Capture button (video shown via always-in-DOM element above) ── */}
-      {cameraState === "live" && (
+      {/* ── LIVE (manual mode only): Capture button ── */}
+      {cameraState === "live" && !autoScanMode && (
         <div className="flex gap-2">
           <Button
             type="button"
@@ -300,6 +454,49 @@ export default function CameraSection({
           >
             <X size={14} />
             Cancel
+          </Button>
+        </div>
+      )}
+
+      {/* ── AUTO SCAN DONE ── */}
+      {scanDone && (
+        <div
+          className="flex items-center gap-3 p-4 rounded-xl border"
+          style={{
+            background: "oklch(0.97 0.02 145)",
+            borderColor: "oklch(0.6 0.14 145 / 0.4)",
+          }}
+          data-ocid="camera.success_state"
+        >
+          <CheckCircle2
+            size={20}
+            style={{ color: "oklch(0.45 0.14 145)" }}
+            className="flex-shrink-0"
+          />
+          <div className="flex-1">
+            <p
+              className="text-sm font-semibold"
+              style={{ color: "oklch(0.38 0.12 145)" }}
+            >
+              Face scanned successfully! ✓
+            </p>
+            <p
+              className="text-xs mt-0.5"
+              style={{ color: "oklch(0.5 0.1 145)" }}
+            >
+              {AUTO_SCAN_TOTAL} face samples captured for accurate recognition.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleRetake}
+            className="text-xs h-8"
+            data-ocid="camera.retry_button"
+          >
+            <RotateCcw size={12} className="mr-1" />
+            Re-scan
           </Button>
         </div>
       )}
@@ -367,17 +564,11 @@ export default function CameraSection({
                 Camera access was blocked
               </p>
               <p className="text-xs" style={{ color: "oklch(0.55 0.12 30)" }}>
-                You chose "Block" — re-enable it in your browser settings.
+                You chose “Block” — re-enable it in your browser settings.
               </p>
             </div>
           </div>
           <div className="px-4 py-3 space-y-2">
-            <p
-              className="text-xs font-semibold"
-              style={{ color: "oklch(0.45 0.14 30)" }}
-            >
-              To unblock camera in Chrome:
-            </p>
             <ol
               className="text-xs space-y-1.5 list-none"
               style={{ color: "oklch(0.5 0.1 30)" }}
@@ -398,7 +589,7 @@ export default function CameraSection({
                 </li>
               ))}
             </ol>
-            <div className="flex gap-2 mt-2 flex-wrap">
+            <div className="flex gap-2 mt-2">
               <Button
                 type="button"
                 size="sm"
@@ -457,7 +648,7 @@ export default function CameraSection({
         </div>
       )}
 
-      {/* ── CAPTURED: Show thumbnail ── */}
+      {/* ── CAPTURED (manual mode) ── */}
       {cameraState === "captured" && capturedImage && (
         <div className="space-y-3">
           <div className="relative">
@@ -514,6 +705,10 @@ export default function CameraSection({
           {photoError}
         </p>
       )}
+
+      <style>{`
+        @keyframes blink-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+      `}</style>
     </div>
   );
 }
